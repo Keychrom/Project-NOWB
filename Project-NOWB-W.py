@@ -603,7 +603,7 @@ class FullFeaturedBrowser(QMainWindow):
         self.download_manager = DownloadManagerDialog(self)
         
         # ここにバージョン情報を定義
-        self.browser_version = "V1.0.0-Alpha1.B3"
+        self.browser_version = "V1.0.0-Alpha1.0"
 
         # current_search_engine_url を、save_settings() が呼び出される前にデフォルト値で初期化します。
         self.current_search_engine_url = "https://www.google.com/search?q=" 
