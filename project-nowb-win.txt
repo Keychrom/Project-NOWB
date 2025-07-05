@@ -1,0 +1,2571 @@
+import sys
+import random
+import time
+import platform
+import os
+import json
+import requests
+import re
+import numpy as np
+import xml.etree.ElementTree as ET # RSSリーダー用
+from io import BytesIO
+from urllib.parse import urlparse
+import qrcode
+from PIL.ImageQt import ImageQt
+from PIL import Image
+from PyQt6.QtCore import QUrl, QFileInfo, Qt, QTimer, QSettings, QSize, pyqtSignal, QObject, QCoreApplication, QTime
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QToolBar, QLineEdit,
+    QTabWidget, QProgressBar, QMenu, QFileDialog, QInputDialog, QComboBox, QMessageBox, QSlider, QLabel,
+    QDialog, QGridLayout, QListWidget, QPushButton, QVBoxLayout, QHBoxLayout, QGroupBox,
+    QPlainTextEdit, QFrame, QSpinBox, QGraphicsScene, QGraphicsView, QGraphicsPixmapItem, QGraphicsRectItem,
+    QStyle, QScrollArea, QTextBrowser
+)
+from PyQt6.QtGui import QAction, QKeySequence, QColor, QPalette, QImage, QPainter, QPixmap, QIcon, QBrush
+
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEngineDownloadRequest, QWebEngineProfile, QWebEnginePage
+
+# テーマ変更を通知するためのグローバルシグナルクラス
+class ThemeSignal(QObject):
+    theme_changed = pyqtSignal(str)
+theme_signal = ThemeSignal()
+
+class InitialSetupDialog(QDialog):
+    """
+    初回起動時に表示される設定ダイアログ。
+    ホーム画面URLとデフォルト検索エンジンを設定。
+    """
+    def __init__(self, parent=None, initial_settings=None):
+        super().__init__(parent)
+        self.setWindowTitle("Project-NOWB 初回設定")
+        self.setFixedSize(450, 250) # 初回設定なのでコンパクトに
+
+        self.initial_settings = initial_settings or {}
+        self.init_ui()
+
+    def init_ui(self):
+        main_layout = QVBoxLayout(self)
+
+        # ホームページ設定
+        home_group = QGroupBox("ホームページ設定")
+        home_layout = QVBoxLayout()
+        home_layout.addWidget(QLabel("起動時に表示するURL:"))
+        self.home_url_input = QLineEdit(self.initial_settings.get('home_url', 'https://www.google.com'))
+        home_layout.addWidget(self.home_url_input)
+        home_group.setLayout(home_layout)
+        main_layout.addWidget(home_group)
+
+        # 検索エンジン設定
+        search_group = QGroupBox("デフォルト検索エンジン")
+        search_layout = QVBoxLayout()
+        search_layout.addWidget(QLabel("使用する検索エンジン:"))
+        self.search_engine_combo = QComboBox()
+        self.search_engine_options = {
+            "Google": "https://www.google.com/search?q=",
+            "Bing": "https://www.bing.com/search?q=",
+            "DuckDuckGo": "https://duckduckgo.com/?q=",
+        }
+        self.search_engine_combo.addItems(self.search_engine_options.keys())
+        # デフォルト選択
+        default_engine = self.initial_settings.get('search_engine_name', 'Google')
+        if default_engine in self.search_engine_options:
+            self.search_engine_combo.setCurrentText(default_engine)
+        search_layout.addWidget(self.search_engine_combo)
+        search_group.setLayout(search_layout)
+        main_layout.addWidget(search_group)
+
+        # OKボタン
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton("設定を保存して開始")
+        ok_button.clicked.connect(self.accept)
+        button_layout.addStretch(1)
+        button_layout.addWidget(ok_button)
+        main_layout.addLayout(button_layout)
+
+    def get_settings(self):
+        """ダイアログから設定を取得して返す"""
+        selected_engine_name = self.search_engine_combo.currentText()
+        return {
+            'home_url': self.home_url_input.text(),
+            'search_engine_name': selected_engine_name,
+            'search_engine_url': self.search_engine_options[selected_engine_name]
+        }
+
+class SettingsDialog(QDialog):
+    """
+    設定画面を実装するための専用ダイアログ。
+    """
+    def __init__(self, parent=None, settings_data=None, browser_version="未設定"): # browser_version引数を追加
+        super().__init__(parent)
+        self.setWindowTitle("Project-NOWB 設定")
+        self.setFixedSize(600, 750) # 少し大きめのウィンドウサイズ
+        self.settings_data = settings_data or {}
+        self.browser_version = browser_version # バージョン情報をインスタンス変数に保存
+        self.init_ui()
+
+    def init_ui(self):
+        main_layout = QGridLayout(self)
+
+        # --- ホームページ設定グループ ---
+        home_group = QGroupBox("ホームページ設定")
+        home_layout = QVBoxLayout()
+        self.home_url_input = QLineEdit(self.settings_data.get('home_url', 'http://www.google.com'))
+        home_layout.addWidget(QLabel("URL:"))
+        home_layout.addWidget(self.home_url_input)
+        home_group.setLayout(home_layout)
+        main_layout.addWidget(home_group, 0, 0)
+
+        # --- 集中ポーション (ブロックサイト) グループ ---
+        blocked_group = QGroupBox("集中ポーション (ブロックサイト/キーワード)")
+        blocked_layout = QVBoxLayout()
+        
+        self.blocked_list = QListWidget()
+        self.blocked_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.blocked_list.addItems(self.settings_data.get('blocked_sites', []))
+        
+        self.add_blocked_button = QPushButton("追加")
+        self.add_blocked_button.clicked.connect(self.add_blocked_site)
+        self.remove_blocked_button = QPushButton("削除")
+        self.remove_blocked_button.clicked.connect(self.remove_blocked_site)
+        
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.add_blocked_button)
+        button_layout.addWidget(self.remove_blocked_button)
+        
+        blocked_layout.addWidget(self.blocked_list)
+        blocked_layout.addLayout(button_layout)
+        blocked_group.setLayout(blocked_layout)
+        main_layout.addWidget(blocked_group, 1, 0)
+        
+        # --- 検索エンジン設定グループ ---
+        search_group = QGroupBox("検索エンジン設定")
+        search_layout = QVBoxLayout()
+        self.search_engine_combo = QComboBox()
+        self.search_engine_combo.addItems(self.settings_data.get('search_engines', {}).keys())
+        # 現在のデフォルト検索エンジンを設定
+        current_default_engine_name = next((name for name, url in self.settings_data.get('search_engines', {}).items() if url == self.settings_data.get('current_search_engine_url')), "Google")
+        self.search_engine_combo.setCurrentText(current_default_engine_name)
+
+        search_layout.addWidget(QLabel("デフォルト検索エンジン:"))
+        search_layout.addWidget(self.search_engine_combo)
+        search_group.setLayout(search_layout)
+        main_layout.addWidget(search_group, 0, 1)
+
+        # --- お気に入りサイト管理グループ ---
+        favorites_group = QGroupBox("お気に入りサイト管理")
+        favorites_layout = QVBoxLayout()
+        
+        self.favorites_list = QListWidget()
+        for name, url in self.settings_data.get('favorite_sites', {}).items():
+            self.favorites_list.addItem(f"{name}: {url}")
+            
+        self.add_fav_button = QPushButton("追加")
+        self.add_fav_button.clicked.connect(self.add_favorite_site)
+        self.remove_fav_button = QPushButton("削除")
+        self.remove_fav_button.clicked.connect(self.remove_favorite_site)
+        
+        fav_button_layout = QHBoxLayout()
+        fav_button_layout.addWidget(self.add_fav_button)
+        fav_button_layout.addWidget(self.remove_fav_button)
+        
+        favorites_layout.addWidget(self.favorites_list)
+        favorites_layout.addLayout(fav_button_layout)
+        favorites_group.setLayout(favorites_layout)
+        main_layout.addWidget(favorites_group, 1, 1)
+        
+        # --- UI/カスタマイズ設定グループ ---
+        ui_group = QGroupBox("UI/カスタマイズ設定")
+        ui_layout = QGridLayout()
+        
+        # 背景画像設定
+        self.bg_image_path_input = QLineEdit(self.settings_data.get('background_image', ''))
+        self.bg_image_button = QPushButton("参照...")
+        self.bg_image_button.clicked.connect(self.select_background_image)
+        ui_layout.addWidget(QLabel("背景画像:"), 0, 0)
+        ui_layout.addWidget(self.bg_image_path_input, 0, 1)
+        ui_layout.addWidget(self.bg_image_button, 0, 2)
+
+        # カスタムCSS設定
+        self.custom_css_input = QPlainTextEdit(self.settings_data.get('custom_css', ''))
+        self.custom_css_input.setPlaceholderText("ここにカスタムCSSを入力してください。例: body { background-color: #f0f0f0; }")
+        ui_layout.addWidget(QLabel("カスタムCSS:"), 1, 0, 1, 3)
+        ui_layout.addWidget(self.custom_css_input, 2, 0, 1, 3)
+
+        # ナイトモード設定
+        self.night_mode_start = QSpinBox()
+        self.night_mode_start.setRange(0, 23)
+        self.night_mode_start.setValue(self.settings_data.get('night_mode_start', 22))
+        self.night_mode_end = QSpinBox()
+        self.night_mode_end.setRange(0, 23)
+        self.night_mode_end.setValue(self.settings_data.get('night_mode_end', 7))
+        
+        ui_layout.addWidget(QLabel("ナイトモード開始時刻 (時):"), 3, 0)
+        ui_layout.addWidget(self.night_mode_start, 3, 1)
+        ui_layout.addWidget(QLabel("ナイトモード終了時刻 (時):"), 4, 0)
+        ui_layout.addWidget(self.night_mode_end, 4, 1)
+        
+        ui_group.setLayout(ui_layout)
+        main_layout.addWidget(ui_group, 2, 0, 1, 2)
+        
+        # --- RSSフィード設定グループ ---
+        rss_group = QGroupBox("RSSフィード設定")
+        rss_layout = QVBoxLayout()
+        
+        self.rss_list = QListWidget()
+        for feed_url in self.settings_data.get('rss_feeds', []):
+            self.rss_list.addItem(feed_url)
+            
+        self.add_rss_button = QPushButton("追加")
+        self.add_rss_button.clicked.connect(self.add_rss_feed)
+        self.remove_rss_button = QPushButton("削除")
+        self.remove_rss_button.clicked.connect(self.remove_rss_feed)
+        
+        rss_button_layout = QHBoxLayout()
+        rss_button_layout.addWidget(self.add_rss_button)
+        rss_button_layout.addWidget(self.remove_rss_button)
+        
+        rss_layout.addWidget(self.rss_list)
+        rss_layout.addLayout(rss_button_layout)
+        rss_group.setLayout(rss_layout)
+        main_layout.addWidget(rss_group, 3, 0) # 新しい行に配置
+        
+        # --- ワークスペース設定グループ ---
+        workspace_group = QGroupBox("ワークスペース設定")
+        workspace_layout = QVBoxLayout()
+        
+        self.workspace_list = QListWidget()
+        for ws_name, ws_data in self.settings_data.get('workspaces', {}).items():
+            self.workspace_list.addItem(ws_name)
+            
+        self.add_workspace_button = QPushButton("追加")
+        self.add_workspace_button.clicked.connect(self.add_workspace)
+        self.edit_workspace_button = QPushButton("編集")
+        self.edit_workspace_button.clicked.connect(self.edit_workspace)
+        self.remove_workspace_button = QPushButton("削除")
+        self.remove_workspace_button.clicked.connect(self.remove_workspace)
+        
+        workspace_button_layout = QHBoxLayout()
+        workspace_button_layout.addWidget(self.add_workspace_button)
+        workspace_button_layout.addWidget(self.edit_workspace_button)
+        workspace_button_layout.addWidget(self.remove_workspace_button)
+        
+        workspace_layout.addWidget(self.workspace_list)
+        workspace_layout.addLayout(workspace_button_layout)
+        workspace_group.setLayout(workspace_layout)
+        main_layout.addWidget(workspace_group, 3, 1) # RSSフィードの隣に配置
+
+
+        # --- OK/キャンセルボタン ---
+        button_box = QHBoxLayout()
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("キャンセル")
+        cancel_button.clicked.connect(self.reject)
+        button_box.addStretch(1)
+        button_box.addWidget(ok_button)
+        button_box.addWidget(cancel_button)
+        main_layout.addLayout(button_box, 4, 0, 1, 2) # バージョンラベルの1つ上の行に配置
+
+        # --- バージョン情報表示 (最下部に配置) ---
+        version_label = QLabel(f"バージョン: **Project-NOWB {self.browser_version}**")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom) # 右下寄せ
+        main_layout.addWidget(version_label, 5, 0, 1, 2) # 最下行、2列にまたがって配置
+
+
+    def add_blocked_site(self):
+        text, ok = QInputDialog.getText(self, "ブロックサイト/キーワードの追加", "ブロックするURLまたはキーワードを入力してください (例: twitter.com, ゲーム):")
+        if ok and text:
+            self.blocked_list.addItem(text)
+    
+    def remove_blocked_site(self):
+        selected_items = self.blocked_list.selectedItems()
+        if not selected_items:
+            return
+        for item in selected_items:
+            self.blocked_list.takeItem(self.blocked_list.row(item))
+
+    def add_favorite_site(self):
+        name, ok_name = QInputDialog.getText(self, "お気に入りの追加", "名前:")
+        if not ok_name or not name: return
+        url, ok_url = QInputDialog.getText(self, "お気に入りの追加", "URL:")
+        if not ok_url or not url: return
+        self.favorites_list.addItem(f"{name}: {url}")
+
+    def remove_favorite_site(self):
+        selected_items = self.favorites_list.selectedItems()
+        if not selected_items:
+            return
+        for item in selected_items:
+            self.favorites_list.takeItem(self.favorites_list.row(item))
+
+    def select_background_image(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "背景画像の選択", "", "Image Files (*.png *.jpg *.jpeg *.gif)")
+        if file_path:
+            self.bg_image_path_input.setText(file_path)
+
+    def add_rss_feed(self):
+        feed_url, ok = QInputDialog.getText(self, "RSSフィードの追加", "RSSフィードのURLを入力してください:")
+        if ok and feed_url:
+            self.rss_list.addItem(feed_url)
+
+    def remove_rss_feed(self):
+        selected_items = self.rss_list.selectedItems()
+        if not selected_items: return
+        for item in selected_items:
+            self.rss_list.takeItem(self.rss_list.row(item))
+            
+    def add_workspace(self):
+        name, ok_name = QInputDialog.getText(self, "ワークスペースを追加", "ワークスペースの名前:")
+        if not ok_name or not name: return
+
+        urls_str, ok_urls = QInputDialog.getMultiLineText(self, "ワークスペースのURL", "新しい行に1つずつURLを入力してください:")
+        if not ok_urls or not urls_str: return
+
+        urls = [u.strip() for u in urls_str.split('\n') if u.strip()]
+        self.settings_data.setdefault('workspaces', {})[name] = {'urls': urls}
+        self.workspace_list.addItem(name)
+        QMessageBox.information(self, "ワークスペース", f"ワークスペース '{name}' を追加しました。")
+
+    def edit_workspace(self):
+        selected_item = self.workspace_list.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "ワークスペースの編集", "編集するワークスペースを選択してください。")
+            return
+        
+        old_name = selected_item.text()
+        current_urls = "\n".join(self.settings_data.get('workspaces', {}).get(old_name, {}).get('urls', []))
+
+        name, ok_name = QInputDialog.getText(self, "ワークスペースを編集", "ワークスペースの名前:", text=old_name)
+        if not ok_name or not name: return
+
+        urls_str, ok_urls = QInputDialog.getMultiLineText(self, "ワークスペースのURL", "新しい行に1つずつURLを入力してください:", text=current_urls)
+        if not ok_urls or not urls_str: return
+
+        urls = [u.strip() for u in urls_str.split('\n') if u.strip()]
+        
+        # 古いエントリを削除し、新しいエントリを追加
+        del self.settings_data['workspaces'][old_name]
+        self.settings_data['workspaces'][name] = {'urls': urls}
+        selected_item.setText(name) # リストの表示を更新
+        QMessageBox.information(self, "ワークスペース", f"ワークスペース '{name}' を更新しました。")
+
+    def remove_workspace(self):
+        selected_item = self.workspace_list.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "ワークスペースの削除", "削除するワークスペースを選択してください。")
+            return
+        
+        name_to_remove = selected_item.text()
+        reply = QMessageBox.question(self, "ワークスペースの削除", 
+                                     f"ワークスペース '{name_to_remove}' を本当に削除しますか？",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            del self.settings_data['workspaces'][name_to_remove]
+            self.workspace_list.takeItem(self.workspace_list.row(selected_item))
+            QMessageBox.information(self, "ワークスペース", f"ワークスペース '{name_to_remove}' を削除しました。")
+
+
+    def get_settings(self):
+        """ダイアログから設定を取得して返す"""
+        new_blocked_sites = [self.blocked_list.item(i).text() for i in range(self.blocked_list.count())]
+        new_favorites = {}
+        for i in range(self.favorites_list.count()):
+            item_text = self.favorites_list.item(i).text()
+            if ': ' in item_text:
+                name, url = item_text.split(": ", 1)
+                new_favorites[name] = url
+            else:
+                new_favorites[item_text] = item_text # 名前とURLが同じ場合
+        
+        selected_engine_name = self.search_engine_combo.currentText()
+        # search_engines辞書からURLを取得し、新しい設定として返す
+        search_engines_data = self.settings_data.get('search_engines', {
+            "Google": "https://www.google.com/search?q=",
+            "Bing": "https://www.bing.com/search?q=",
+            "DuckDuckGo": "https://duckduckgo.com/?q=",
+        })
+        selected_engine_url = search_engines_data.get(selected_engine_name, "https://www.google.com/search?q=")
+
+        new_rss_feeds = [self.rss_list.item(i).text() for i in range(self.rss_list.count())]
+
+        return {
+            'home_url': self.home_url_input.text(),
+            'blocked_sites': new_blocked_sites,
+            'search_engine_name': selected_engine_name, # 新しく選択された検索エンジンの名前
+            'current_search_engine_url': selected_engine_url, # 新しく選択された検索エンジンのURL
+            'favorite_sites': new_favorites,
+            'background_image': self.bg_image_path_input.text(),
+            'custom_css': self.custom_css_input.toPlainText(),
+            'night_mode_start': self.night_mode_start.value(),
+            'night_mode_end': self.night_mode_end.value(),
+            'rss_feeds': new_rss_feeds,
+            'workspaces': self.settings_data.get('workspaces', {}) # ワークスペースは add/edit/remove で直接 settings_data を更新しているため、ここではそのまま返す
+        }
+
+class RSSReaderDialog(QDialog):
+    def __init__(self, parent=None, rss_feeds=None):
+        super().__init__(parent)
+        self.setWindowTitle("RSSリーダー")
+        self.setFixedSize(700, 500)
+        self.rss_feeds = rss_feeds or []
+        self.init_ui()
+        self.load_feeds()
+
+    def init_ui(self):
+        main_layout = QVBoxLayout(self)
+
+        self.feed_list = QListWidget()
+        self.feed_list.itemClicked.connect(self.show_feed_content)
+        main_layout.addWidget(self.feed_list)
+
+        self.article_browser = QTextBrowser()
+        self.article_browser.setOpenExternalLinks(True) # リンクは外部ブラウザで開く
+        main_layout.addWidget(self.article_browser)
+
+        button_layout = QHBoxLayout()
+        refresh_button = QPushButton("更新")
+        refresh_button.clicked.connect(self.load_feeds)
+        close_button = QPushButton("閉じる")
+        close_button.clicked.connect(self.accept)
+        button_layout.addStretch()
+        button_layout.addWidget(refresh_button)
+        button_layout.addWidget(close_button)
+        main_layout.addLayout(button_layout)
+
+    def load_feeds(self):
+        self.feed_list.clear()
+        self.article_browser.clear()
+        self.feed_articles = {} # {feed_url: [articles]}
+
+        for feed_url in self.rss_feeds:
+            try:
+                response = requests.get(feed_url, timeout=5)
+                response.raise_for_status() # HTTPエラーをチェック
+                root = ET.fromstring(response.content)
+
+                articles = []
+                # RSS 2.0 (channel/item)
+                for item in root.findall('.//item'):
+                    title = item.find('title').text if item.find('title') is not None else 'No Title'
+                    link = item.find('link').text if item.find('link') is not None else '#'
+                    description = item.find('description').text if item.find('description') is not None else ''
+                    articles.append({'title': title, 'link': link, 'description': description})
+                
+                # Atom 1.0 (feed/entry)
+                if not articles: # RSSが見つからなければAtomを試す
+                    for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
+                        title = entry.find('{http://www.w3.org/2005/Atom}title').text if entry.find('{http://www.w3.org/2005/Atom}title') is not None else 'No Title'
+                        link_el = entry.find('{http://www.w3.org/2005/Atom}link')
+                        link = link_el.get('href') if link_el is not None else '#'
+                        summary_el = entry.find('{http://www.w3.org/2005/Atom}summary')
+                        description = summary_el.text if summary_el is not None else ''
+                        articles.append({'title': title, 'link': link, 'description': description})
+
+                if articles:
+                    self.feed_list.addItem(f"[{feed_url}] - 新着: {len(articles)}件")
+                    self.feed_articles[feed_url] = articles
+                else:
+                    self.feed_list.addItem(f"[{feed_url}] - 記事なし/解析失敗")
+
+            except requests.exceptions.RequestException as e:
+                self.feed_list.addItem(f"[{feed_url}] - 接続エラー: {e}")
+            except ET.ParseError as e:
+                self.feed_list.addItem(f"[{feed_url}] - XML解析エラー: {e}")
+            except Exception as e:
+                self.feed_list.addItem(f"[{feed_url}] - 不明なエラー: {e}")
+
+    def show_feed_content(self, item):
+        feed_url_match = re.match(r'\[(.*?)\]', item.text())
+        if not feed_url_match: return
+        feed_url = feed_url_match.group(1)
+
+        self.article_browser.clear()
+        if feed_url in self.feed_articles:
+            html_content = ""
+            for article in self.feed_articles[feed_url]:
+                html_content += f"<h3><a href=\"{article['link']}\">{article['title']}</a></h3>"
+                html_content += f"<p>{article['description']}</p><hr>"
+            self.article_browser.setHtml(html_content)
+        else:
+            self.article_browser.setText("記事を読み込めませんでした。")
+
+class HomeWebView(QWebEngineView):
+    """
+    独自のホーム画面を表示するためのカスタムWebEngineView。
+    """
+    def __init__(self, parent=None, favorites=None, custom_css=''):
+        super().__init__(parent)
+        self.favorites = favorites or {}
+        self.custom_css = custom_css
+        self.load_home_page()
+        
+    def load_home_page(self):
+        html_content = self._generate_html()
+        self.setHtml(html_content, QUrl("about:home"))
+
+    def _generate_html(self):
+        # r-string (raw string) for regex to avoid SyntaxWarning
+        return rf"""
+            <html>
+            <head>
+                <title>Project-NOWB ホーム</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        height: 100vh;
+                        margin: 0;
+                        background: #f0f0f0;
+                        color: #333;
+                        transition: background-color 0.5s, color 0.5s;
+                        {self.custom_css}
+                    }}
+                    .dark-mode body {{
+                        background: #2a2a2a;
+                        color: #f0f0f0;
+                    }}
+                    .container {{
+                        text-align: center;
+                        padding: 20px;
+                        border-radius: 15px;
+                        background: rgba(255, 255, 255, 0.8);
+                        backdrop-filter: blur(10px);
+                        -webkit-backdrop-filter: blur(10px);
+                        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
+                        transition: background 0.5s, box-shadow 0.5s;
+                    }}
+                    .dark-mode .container {{
+                        background: rgba(0, 0, 0, 0.6);
+                        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+                    }}
+                    .welcome-text {{
+                        font-size: 3em;
+                        font-weight: bold;
+                        margin-bottom: 20px;
+                        text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+                    }}
+                    .search-bar-container {{
+                        width: 60%;
+                        max-width: 700px;
+                        margin: 20px auto;
+                    }}
+                    .search-input {{
+                        width: 100%;
+                        padding: 15px 20px;
+                        border-radius: 30px;
+                        border: 2px solid #ccc;
+                        font-size: 1.2em;
+                        outline: none;
+                        transition: all 0.3s ease;
+                        box-sizing: border-box;
+                    }}
+                    .search-input:focus {{
+                        border-color: #0078d7;
+                        box-shadow: 0 0 10px rgba(0, 120, 215, 0.3);
+                    }}
+                    .dark-mode .search-input {{
+                        background: #333;
+                        color: #f0f0f0;
+                        border-color: #555;
+                    }}
+                    .quick-links {{
+                        margin-top: 30px;
+                        display: flex;
+                        flex-wrap: wrap;
+                        justify-content: center;
+                        gap: 20px;
+                    }}
+                    .link-item {{
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        text-decoration: none;
+                        color: inherit;
+                        transition: transform 0.2s ease, opacity 0.2s ease;
+                    }}
+                    .link-item:hover {{
+                        transform: translateY(-5px);
+                        opacity: 0.8;
+                    }}
+                    .link-icon {{
+                        width: 60px;
+                        height: 60px;
+                        background-color: #fff;
+                        border-radius: 15px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin-bottom: 8px;
+                        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+                    }}
+                    .link-icon img {{
+                        width: 40px;
+                        height: 40px;
+                    }}
+                    .link-name {{
+                        font-size: 0.9em;
+                        font-weight: 500;
+                    }}
+                    .dark-mode .link-icon {{
+                        background-color: #444;
+                        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="welcome-text">NOWB ホーム</div>
+                    <div class="search-bar-container">
+                        <input type="text" class="search-input" id="search-input" placeholder="検索またはURLを入力..." onkeydown="handleSearch(event)">
+                    </div>
+                    <div class="quick-links" id="quick-links-container">
+                        </div>
+                </div>
+
+                <script>
+                    const searchInput = document.getElementById('search-input');
+                    const quickLinksContainer = document.getElementById('quick-links-container');
+
+                    // Pythonからお気に入りのサイトのデータを取得してリンクを生成
+                    function createQuickLinks(favorites) {{
+                        quickLinksContainer.innerHTML = ''; // 既存のリンクをクリア
+                        for (const name in favorites) {{
+                            const url = favorites[name];
+                            const linkItem = document.createElement('a');
+                            linkItem.href = url;
+                            linkItem.className = 'link-item';
+                            linkItem.target = '_self'; // 同じタブで開く
+                            linkItem.onclick = function(event) {{
+                                event.preventDefault();
+                                window.location.href = url;
+                            }};
+
+                            // ファビコン用のアイコンを作成
+                            const iconDiv = document.createElement('div');
+                            iconDiv.className = 'link-icon';
+                            let domain;
+                            try {{
+                                domain = new URL(url).hostname;
+                            }} catch (e) {{
+                                domain = url; // URLが無効な場合はそのまま
+                            }}
+                            iconDiv.innerHTML = `<img src="https://www.google.com/s2/favicons?domain=${{domain}}&sz=64" alt="${{name}}">`;
+
+                            const linkName = document.createElement('div');
+                            linkName.className = 'link-name';
+                            linkName.textContent = name;
+
+                            linkItem.appendChild(iconDiv);
+                            linkItem.appendChild(linkName);
+                            quickLinksContainer.appendChild(linkItem);
+                        }}
+                    }}
+                    
+                    function handleSearch(event) {{
+                        if (event.key === 'Enter') {{
+                            const query = searchInput.value;
+                            if (query) {{
+                                // Pythonの`Maps_or_search`をシミュレート
+                                if (query.startsWith('http://') || query.startsWith('https://') || query.includes('.')) {{
+                                    window.location.href = query;
+                                }} else {{
+                                    // 検索エンジンURLを動的に設定
+                                    // Python側から現在の検索エンジンを取得する必要があるが、ここではGoogleをデフォルトとする
+                                    const searchUrl = 'https://www.google.com/search?q=' + encodeURIComponent(query);
+                                    window.location.href = searchUrl;
+                                }}
+                            }}
+                        }}
+                    }}
+                    
+                    // テーマ変更をリッスン
+                    window.onThemeChanged = function(theme) {{
+                        document.body.classList.toggle('dark-mode', theme === 'dark');
+                    }};
+
+                    // 初期ロード時にお気に入りを表示
+                    window.onload = function() {{
+                        const favoritesFromPython = {json.dumps(self.favorites)};
+                        createQuickLinks(favoritesFromPython);
+                        
+                        // 初期テーマを設定
+                        const initialTheme = document.body.style.backgroundColor === 'rgb(42, 42, 42)' ? 'dark' : 'light';
+                        window.onThemeChanged(initialTheme);
+                    }};
+                </script>
+            </body>
+            </html>
+        """
+
+class WebpageComposer:
+    """
+    ウェブページの要素から音を生成する（概念的な）クラス。
+    実際にはWeb Audio APIなどを利用してブラウザ側で音を出すのが効率的。
+    ここでは、JSを注入して音を出すシミュレーションを行う。
+    """
+    def __init__(self, browser_view):
+        self.browser_view = browser_view
+        self.is_playing = False
+        self.synth_script = """
+            // Web Audio APIのコンテキストを初期化
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            let oscillator = null;
+            let gainNode = null;
+
+            function playSound(freq, duration, volume) {
+                if (oscillator) {
+                    oscillator.stop();
+                    oscillator.disconnect();
+                }
+                oscillator = audioCtx.createOscillator();
+                gainNode = audioCtx.createGain();
+
+                oscillator.type = 'sine'; // 正弦波
+                oscillator.frequency.setValueAtTime(freq, audioCtx.currentTime); // 周波数
+
+                gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration); // フェードアウト
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + duration);
+            }
+
+            function stopSound() {
+                if (oscillator) {
+                    oscillator.stop();
+                    oscillator.disconnect();
+                    oscillator = null;
+                }
+            }
+
+            // ページのDOM要素を解析し、音を生成するロジック (簡略化)
+            // この関数はPythonから呼び出されることを想定
+            window.composePageSound = function() {
+                stopSound(); // 以前の音を停止
+
+                const body = document.body;
+                if (!body) return;
+
+                const numImages = document.querySelectorAll('img').length;
+                const numLinks = document.querySelectorAll('a').length;
+                const textLength = body.innerText.length;
+                const totalElements = document.querySelectorAll('*').length;
+
+                // 各要素の数に基づいて周波数とボリュームを計算
+                // 適当な計算式で音を生成
+                let freq = 220 + (numImages * 10) + (numLinks * 5); // 画像とリンクが多いほど高音に
+                let volume = 0.3 + (textLength / 10000) * 0.1; // テキストが多いほど少し音量アップ
+                volume = Math.min(0.8, volume); // 最大音量制限
+
+                let duration = 0.5 + (totalElements / 500) * 0.1; // 要素が多いほど持続時間を長く
+                duration = Math.min(2.0, duration); // 最大持続時間制限
+
+                // ドメイン名に基づいて少し音に変化を加える (例: .comなら低め、.orgなら高め)
+                const hostname = window.location.hostname;
+                if (hostname.includes('.com')) freq -= 50;
+                if (hostname.includes('.org')) freq += 50;
+                if (hostname.includes('.jp')) freq += 20;
+
+                // 音を再生
+                playSound(freq, duration, volume);
+                console.log('Composed sound: Freq=' + freq + ', Duration=' + duration + ', Volume=' + volume);
+            };
+
+            // スクロールイベントで音を変化させるためのリスナー (簡易版)
+            let lastScrollY = window.scrollY;
+            window.addEventListener('scroll', () => {
+                const currentScrollY = window.scrollY;
+                if (Math.abs(currentScrollY - lastScrollY) > 50) { // スクロール量が大きければ再作曲
+                    // composePageSound(); // スクロールごとに音を変える場合はこの行を有効化
+                    lastScrollY = currentScrollY;
+                }
+            });
+        """
+
+    def start_composing(self):
+        if self.is_playing: return
+        self.is_playing = True
+        self.browser_view.page().runJavaScript(self.synth_script)
+        # ページロード完了後に自動的に音を生成
+        self.browser_view.page().runJavaScript("window.composePageSound();")
+        
+        # ページ遷移やロード完了時にも作曲をトリガー
+        self.browser_view.urlChanged.connect(self._on_url_changed)
+        self.browser_view.loadFinished.connect(self._on_load_finished)
+        
+        QMessageBox.information(self.browser_view, "ウェブページ作曲家", "作曲を開始しました！ページの要素が音になります。")
+
+    def stop_composing(self):
+        if not self.is_playing: return
+        self.is_playing = False
+        self.browser_view.page().runJavaScript("window.stopSound();")
+        
+        # イベント接続を解除 (メモリリーク防止)
+        try:
+            self.browser_view.urlChanged.disconnect(self._on_url_changed)
+        except TypeError: # 接続されていない場合にTypeErrorが発生するのを防ぐ
+            pass
+        try:
+            self.browser_view.loadFinished.disconnect(self._on_load_finished)
+        except TypeError:
+            pass
+            
+        QMessageBox.information(self.browser_view, "ウェブページ作曲家", "作曲を停止しました。")
+
+    def _on_url_changed(self, url):
+        # 新しいURLに移動したら、音をリセットして再作曲
+        if self.is_playing:
+            self.browser_view.page().runJavaScript("window.stopSound();")
+
+    def _on_load_finished(self, ok):
+        # ページロード完了時に再作曲
+        if ok and self.is_playing:
+            self.browser_view.page().runJavaScript("window.composePageSound();")
+
+class FullFeaturedBrowser(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.settings_file = 'project_nowb_settings.json'
+        
+        # ここにバージョン情報を定義
+        self.browser_version = "V1.0.0-Alpha1"
+
+        # current_search_engine_url を、save_settings() が呼び出される前にデフォルト値で初期化します。
+        self.current_search_engine_url = "https://www.google.com/search?q=" 
+
+        # 初回起動設定の処理
+        if not os.path.exists(self.settings_file):
+            # 初回起動時に使用するデフォルト設定を settings_data に直接セット
+            self.settings_data = {
+                'first_run_completed': False, # まだ完了していない
+                'home_url': 'https://www.google.com',
+                'search_engines': {
+                    "Google": "https://www.google.com/search?q=",
+                    "Bing": "https://www.bing.com/search?q=",
+                    "DuckDuckGo": "https://duckduckgo.com/?q=",
+                },
+                'current_search_engine_url': self.current_search_engine_url, # 上記で初期化されたデフォルト値を使用
+                'blocked_sites': ['twitter.com', 'facebook.com', 'tiktok.com'],
+                'favorite_sites': {
+                    "Google": "https://www.google.com",
+                    "GitHub": "https://github.com",
+                    "YouTube": "https://www.youtube.com",
+                    "Wikipedia": "https://www.wikipedia.org"
+                },
+                'background_image': '',
+                'custom_css': '',
+                'window_size': [800, 600],
+                'window_pos': [100, 100],
+                'night_mode_start': 22,
+                'night_mode_end': 7,
+                'rss_feeds': [], # RSSフィードの初期化
+                'workspaces': { # ワークスペースの初期化
+                    "デフォルト": {"urls": ["https://www.google.com", "https://github.com"]},
+                    "ニュース": {"urls": ["https://www.bbc.com/news", "https://www.nytimes.com"]}
+                },
+                'saved_sessions': {} # 保存されたセッションの初期化
+            }
+            # save_settings() を呼び出す前に self.settings を self.settings_data に設定
+            # これにより save_settings() が self.settings にアクセスできるようになります。
+            self.settings = self.settings_data.copy() # settings_data の内容を settings にコピー
+
+            # 初回セットアップダイアログを実行
+            self.run_initial_setup() 
+            
+            # run_initial_setup() 内で設定が更新されるため、再度 settings_data をロードし直します。
+            self.settings_data = self.load_settings()
+            # ロードされたデータから self.settings と current_search_engine_url を更新します。
+            self.settings = self.settings_data.copy()
+            self.current_search_engine_url = self.settings_data.get('current_search_engine_url', self.settings['search_engines']["Google"])
+
+        else:
+            # ファイルが存在する場合は既存の設定をロード
+            self.settings_data = self.load_settings()
+            self.settings = self.settings_data.copy() # self.settings が確実に設定されるようにします
+            # ロードされた設定から current_search_engine_url を更新します
+            self.current_search_engine_url = self.settings_data.get('current_search_engine_url', self.settings['search_engines']["Google"])
+        
+        self.is_preaching_mode_active = False
+        self.blocked_timer = QTimer()
+        self.blocked_timer.setSingleShot(True)
+        self.blocked_timer.timeout.connect(self.unblock_sites)
+        self.suppress_notifications = False # 集中モード中の通知抑制フラグ
+        
+        self.sleep_timer = QTimer()
+        self.sleep_timer.setInterval(300000) # 5分
+        self.sleep_timer.timeout.connect(self.activate_sleep_mode)
+        self.sleep_timer.start()
+
+        self.tab_groups = {} # この機能はワークスペースに統合されるため、将来的に削除
+        self.tab_group_counter = 0
+        self.notes = {}
+        
+        self.auto_scroll_timer = QTimer()
+        self.auto_scroll_timer.setInterval(50) # 50ms間隔
+        self.auto_scroll_timer.timeout.connect(self.perform_auto_scroll)
+        self.scroll_speed = 10 # 10px per tick
+        
+        self.is_retro_mode_active = False
+        self.is_rain_mode_active = False
+        self.rain_timer = QTimer()
+        self.rain_timer.setInterval(100) # 雨滴の間隔
+        
+        self.webpage_composer = None # WebpageComposerインスタンス
+
+        self.rss_update_timer = QTimer()
+        self.rss_update_timer.setInterval(30 * 60 * 1000) # 30分ごとに更新
+        self.rss_update_timer.timeout.connect(self.check_rss_feeds_for_new_articles)
+        self.rss_update_timer.start() # RSS更新タイマーを開始
+
+        # --- メインウィンドウの設定 ---
+        self.setWindowTitle("Project-NOWB")
+        self.setGeometry(self.settings['window_pos'][0], self.settings['window_pos'][1],
+                         self.settings['window_size'][0], self.settings['window_size'][1])
+
+        # --- 背景フレームの追加 ---
+        self.bg_frame = QFrame(self)
+        self.setCentralWidget(self.bg_frame)
+        self.bg_layout = QVBoxLayout(self.bg_frame)
+        self.bg_layout.setContentsMargins(0, 0, 0, 0)
+
+        # --- タブウィジェットの設定 ---
+        self.tabs = QTabWidget()
+        self.tabs.setTabsClosable(True)
+        self.tabs.tabCloseRequested.connect(self.close_current_tab)
+        self.tabs.currentChanged.connect(self.update_url_bar_on_tab_change)
+        self.tabs.currentChanged.connect(self.reset_sleep_timer)
+        self.bg_layout.addWidget(self.tabs)
+
+        # --- ナビゲーションツールバー ---
+        self.nav_toolbar = QToolBar("Navigation")
+        # Windows/LinuxはCtrl、MacはCmd
+        mod_key = "Ctrl"
+        if platform.system() == "Darwin":
+            mod_key = "Cmd"
+        
+        self.addToolBar(self.nav_toolbar)
+
+        back_btn = QAction("戻る", self)
+        back_btn.triggered.connect(lambda: self.tabs.currentWidget().back())
+        self.nav_toolbar.addAction(back_btn)
+
+        forward_btn = QAction("進む", self)
+        forward_btn.triggered.connect(lambda: self.tabs.currentWidget().forward())
+        self.nav_toolbar.addAction(forward_btn)
+
+        reload_btn = QAction("リロード", self)
+        reload_btn.triggered.connect(lambda: self.tabs.currentWidget().reload())
+        self.nav_toolbar.addAction(reload_btn)
+
+        home_btn = QAction("ホーム", self)
+        home_btn.triggered.connect(self.navigate_home)
+        self.nav_toolbar.addAction(home_btn)
+
+        # --- 新規タブボタンの追加 (URLバーの左隣) ---
+        new_tab_button = QAction("＋", self)  # 「＋」をボタンのテキストとして使用
+        new_tab_button.setToolTip("新しいタブを開く")
+        new_tab_button.triggered.connect(lambda: self.add_new_tab(QUrl(self.settings['home_url'])))
+        self.nav_toolbar.addAction(new_tab_button)
+
+        # --- URLバー ---
+        self.url_bar = QLineEdit()
+        self.url_bar.returnPressed.connect(self.navigate_or_search)
+        self.nav_toolbar.addWidget(self.url_bar)
+
+        # --- 検索エンジンセレクター ---
+        self.search_engine_combo = QComboBox()
+        self.search_engine_combo.addItems(self.settings['search_engines'].keys())
+        # 初回起動で設定された検索エンジンを初期選択
+        initial_search_engine_name = next((name for name, url in self.settings['search_engines'].items() if url == self.current_search_engine_url), "Google")
+        self.search_engine_combo.setCurrentText(initial_search_engine_name)
+
+        self.search_engine_combo.currentTextChanged.connect(self.update_search_engine)
+        self.nav_toolbar.addWidget(self.search_engine_combo)
+        
+        # --- プログレスバー ---
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximumHeight(8)
+        self.progress_bar.setVisible(False)
+        self.nav_toolbar.addWidget(self.progress_bar)
+
+        # --- 音量コントロール ---
+        self.nav_toolbar.addSeparator()
+        self.nav_toolbar.addWidget(QLabel("音量:"))
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setRange(0, 1) # 0でミュート、1でミュート解除
+        self.volume_slider.setValue(1)    # デフォルトはミュート解除
+        self.volume_slider.valueChanged.connect(self.set_volume)
+        self.nav_toolbar.addWidget(self.volume_slider)
+        
+        # --- ハンバーガーメニューボタン ---
+        custom_icon_path = 'menu_icon.png' # 使用したいアイコンファイルのパス
+        if os.path.exists(custom_icon_path):
+            menu_icon = QIcon(custom_icon_path)
+            print(f"カスタムアイコン '{custom_icon_path}' を使用します。")
+        else:
+            menu_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarMenuButton)
+            print(f"警告: アイコンファイル '{custom_icon_path}' が見つかりませんでした。デフォルトのアイコンを使用します。")
+
+        self.hamburger_menu_button = QAction(menu_icon, "メニュー", self)
+        self.hamburger_menu_button.setToolTip("メニューを開く")
+        self.hamburger_menu = QMenu(self)
+        self.hamburger_menu_button.setMenu(self.hamburger_menu)
+        self.nav_toolbar.addSeparator()
+        self.nav_toolbar.addAction(self.hamburger_menu_button)
+
+        # --- ステータスバー ---
+        self.status_bar = self.statusBar()
+        self.status_label = QLabel("準備完了。")
+        self.status_bar.addWidget(self.status_label)
+        
+        # --- ハンバーガーメニューコンテンツの構築 ---
+        self.setup_hamburger_menu()
+        
+        # お気に入りツールバー
+        self.favorites_toolbar = QToolBar("お気に入り")
+        self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.favorites_toolbar)
+        self.update_favorite_sites_toolbar()
+        
+        # イースターエッグ
+        self.set_easter_eggs()
+        
+        # --- 最初のタブを追加 ---
+        # 起動時にホームURL (Google.com) を開く
+        self.add_new_tab(QUrl(self.settings['home_url']), 'ホームページ')
+        
+        # --- UIの初期化 ---
+        self.update_palette_from_system_theme()
+        theme_signal.theme_changed.connect(self.update_palette)
+        self.update_background_image()
+        
+        # ナイトモード用タイマー
+        self.night_mode_timer = QTimer(self)
+        self.night_mode_timer.timeout.connect(self.check_night_mode)
+        self.night_mode_timer.start(60000) # 1分ごとにチェック
+        self.check_night_mode() # 起動時に一度チェック
+        
+    def run_initial_setup(self):
+        """
+        初回起動時に初期設定ダイアログを表示し、設定を保存する。
+        """
+        # 初回起動時に渡す初期設定は、現在の settings_data の値を使用
+        initial_settings = {
+            'home_url': self.settings_data.get('home_url', 'https://www.google.com'),
+            'search_engine_name': next((name for name, url in self.settings_data.get('search_engines', {}).items() if url == self.settings_data.get('current_search_engine_url')), "Google")
+        }
+        
+        dialog = InitialSetupDialog(self, initial_settings)
+        if dialog.exec():
+            # OKが押された場合
+            new_initial_settings = dialog.get_settings()
+            
+            # 設定データに反映 (settings_data を直接更新)
+            self.settings_data['first_run_completed'] = True
+            self.settings_data['home_url'] = new_initial_settings['home_url']
+            self.settings_data['current_search_engine_url'] = new_initial_settings['search_engine_url']
+            self.settings_data['search_engine_name'] = new_initial_settings['search_engine_name'] # 設定名を保存
+
+            # self.settings も settings_data の最新情報で更新
+            self.settings = self.settings_data.copy()
+            # self.current_search_engine_url も更新
+            self.current_search_engine_url = self.settings_data['current_search_engine_url']
+
+            self.save_settings() # 新しい設定を保存
+            if not self.suppress_notifications:
+                QMessageBox.information(self, "設定完了", "初回設定が完了しました！ブラウザを開始します。")
+        else:
+            # キャンセルされた場合、デフォルト設定で続行
+            if not self.suppress_notifications:
+                QMessageBox.warning(self, "警告", "設定が行われなかったため、デフォルト設定で開始します。")
+            self.settings_data['first_run_completed'] = True # デフォルト設定でも初回起動完了とする
+
+            # self.settings と self.current_search_engine_url も更新
+            self.settings = self.settings_data.copy()
+            self.current_search_engine_url = self.settings_data['current_search_engine_url']
+            
+            self.save_settings() # デフォルト設定を保存
+
+
+    def setup_hamburger_menu(self):
+        """
+        ハンバーガーメニューにアクションを追加する。
+        """
+        mod_key = "Ctrl"
+        if platform.system() == "Darwin":
+            mod_key = "Cmd"
+            
+        # ファイルメニュー
+        file_menu = self.hamburger_menu.addMenu("ファイル")
+        new_tab_action = QAction("新しいタブ", self)
+        new_tab_action.triggered.connect(lambda: self.add_new_tab(QUrl(self.settings['home_url'])))
+        file_menu.addAction(new_tab_action)
+        
+        private_tab_action = QAction("プライベートタブ", self)
+        private_tab_action.triggered.connect(self.add_private_tab)
+        file_menu.addAction(private_tab_action)
+        
+        file_menu.addSeparator()
+
+        # セッション管理メニュー
+        self.session_menu = file_menu.addMenu("セッション管理")
+        save_session_action = QAction("現在のセッションを保存", self)
+        save_session_action.triggered.connect(self.save_current_session)
+        self.session_menu.addAction(save_session_action)
+        self.session_menu.addSeparator()
+        self.update_session_menu() # 保存済みセッションを更新
+
+        file_menu.addSeparator()
+
+        save_pdf_action = QAction("ページをPDFで保存", self)
+        save_pdf_action.triggered.connect(self.save_page_as_pdf)
+        file_menu.addAction(save_pdf_action)
+        
+        screenshot_action = QAction("スクリーンショット", self)
+        screenshot_action.setShortcut(QKeySequence(f"{mod_key}+Shift+S"))
+        screenshot_action.triggered.connect(self.take_screenshot)
+        file_menu.addAction(screenshot_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("終了", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # 表示メニュー
+        view_menu = self.hamburger_menu.addMenu("表示")
+        zoom_in_action = QAction("拡大", self)
+        zoom_in_action.setShortcut(QKeySequence(f"{mod_key}++"))
+        zoom_in_action.triggered.connect(self.zoom_in)
+        view_menu.addAction(zoom_in_action)
+        
+        zoom_out_action = QAction("縮小", self)
+        zoom_out_action.setShortcut(QKeySequence(f"{mod_key}+-"))
+        zoom_out_action.triggered.connect(self.zoom_out)
+        view_menu.addAction(zoom_out_action)
+
+        reset_zoom_action = QAction("ズームをリセット", self)
+        reset_zoom_action.setShortcut(QKeySequence(f"{mod_key}+0"))
+        reset_zoom_action.triggered.connect(self.reset_zoom)
+        view_menu.addAction(reset_zoom_action)
+        
+        view_menu.addSeparator()
+        
+        fullscreen_action = QAction("全画面表示", self)
+        fullscreen_action.triggered.connect(self.toggle_fullscreen)
+        view_menu.addAction(fullscreen_action)
+        
+        dev_tools_action = QAction("開発者ツール", self)
+        dev_tools_action.triggered.connect(self.open_dev_tools)
+        view_menu.addAction(dev_tools_action)
+
+        nostalgia_action = QAction("ノスタルジアフィルター", self)
+        nostalgia_action.setCheckable(True)
+        nostalgia_action.toggled.connect(self.toggle_nostalgia_filter)
+        view_menu.addAction(nostalgia_action)
+
+        cyberpunk_action = QAction("サイバーパンクモード", self)
+        cyberpunk_action.setCheckable(True)
+        cyberpunk_action.toggled.connect(self.toggle_cyberpunk_mode)
+        view_menu.addAction(cyberpunk_action)
+
+        retro_pixel_action = QAction("レトロピクセルモード", self)
+        retro_pixel_action.setCheckable(True)
+        retro_pixel_action.toggled.connect(self.toggle_retro_pixel_mode)
+        view_menu.addAction(retro_pixel_action)
+        
+        auto_scroll_menu = view_menu.addMenu("自動スクロール")
+        scroll_start_action = QAction("開始", self)
+        scroll_start_action.triggered.connect(self.start_auto_scroll)
+        auto_scroll_menu.addAction(scroll_start_action)
+        
+        scroll_stop_action = QAction("停止", self)
+        scroll_stop_action.triggered.connect(self.stop_auto_scroll)
+        auto_scroll_menu.addAction(scroll_stop_action)
+        
+        set_speed_action = QAction("速度設定", self)
+        set_speed_action.triggered.connect(self.set_scroll_speed)
+        auto_scroll_menu.addAction(set_speed_action)
+
+        # ツールメニュー
+        tools_menu = self.hamburger_menu.addMenu("ツール")
+        find_in_page_action = QAction("ページ内検索", self)
+        find_in_page_action.setShortcut(QKeySequence(f"{mod_key}+F"))
+        find_in_page_action.triggered.connect(self.find_in_page)
+        tools_menu.addAction(find_in_page_action)
+
+        qr_code_action = QAction("QRコード生成", self)
+        qr_code_action.triggered.connect(self.generate_qr_code)
+        tools_menu.addAction(qr_code_action)
+        
+        translate_action = QAction("ページを翻訳 (日本語へ)", self)
+        translate_action.triggered.connect(self.translate_page)
+        tools_menu.addAction(translate_action)
+
+        # タブグループ -> ワークスペースへ統合
+        self.workspace_menu = tools_menu.addMenu("ワークスペース")
+        self.update_workspace_menu() # ワークスペースメニューを更新
+
+        notes_action = QAction("シンプルメモ帳", self)
+        notes_action.triggered.connect(self.show_notes_dialog)
+        tools_menu.addAction(notes_action)
+
+        ai_chat_action = QAction("AIアシスタントに質問", self)
+        ai_chat_action.triggered.connect(self.start_ai_chat)
+        tools_menu.addAction(ai_chat_action)
+        
+        summarize_action = QAction("AIによる要約", self)
+        summarize_action.triggered.connect(self.summarize_page)
+        tools_menu.addAction(summarize_action)
+
+        analyze_mood_action = QAction("ウェブサイトのムード分析", self)
+        analyze_mood_action.triggered.connect(self.analyze_website_mood)
+        tools_menu.addAction(analyze_mood_action)
+        
+        analyze_sentiment_action = QAction("ページ内感情分析", self)
+        analyze_sentiment_action.triggered.connect(self.analyze_sentiment)
+        tools_menu.addAction(analyze_sentiment_action)
+        
+        rss_reader_action = QAction("RSSリーダー", self)
+        rss_reader_action.triggered.connect(self.show_rss_reader)
+        tools_menu.addAction(rss_reader_action)
+
+        # お気に入り/ブックマーク
+        self.bookmarks_menu = self.hamburger_menu.addMenu("ブックマーク")
+        self.bookmarks = self.settings['favorite_sites']
+        self.update_bookmarks_menu()
+
+        # 履歴
+        self.history_menu = self.hamburger_menu.addMenu("履歴")
+        self.history = []
+        self.update_history_menu()
+
+        # お楽しみメニュー
+        fun_menu = self.hamburger_menu.addMenu("お楽しみ")
+        preaching_mode_action = QAction("集中ポーション (ON/OFF)", self)
+        preaching_mode_action.setCheckable(True)
+        preaching_mode_action.toggled.connect(self.toggle_preaching_mode)
+        fun_menu.addAction(preaching_mode_action)
+        
+        timemachine_action = QAction("タイムマシンモード", self)
+        timemachine_action.triggered.connect(self.activate_timemachine)
+        fun_menu.addAction(timemachine_action)
+
+        time_travel_action = QAction("タイムトラベルモード", self)
+        time_travel_action.triggered.connect(self.toggle_time_travel_mode)
+        fun_menu.addAction(time_travel_action)
+
+        clean_robot_action = QAction("お掃除ロボット起動", self)
+        clean_robot_action.triggered.connect(self.activate_cleaning_robot)
+        fun_menu.addAction(clean_robot_action)
+
+        rain_sound_action = QAction("バーチャル雨音モード (ON/OFF)", self)
+        rain_sound_action.setCheckable(True)
+        rain_sound_action.toggled.connect(self.toggle_rain_sound_mode)
+        fun_menu.addAction(rain_sound_action)
+        
+        mission_mode_action = QAction("ミッションモード", self)
+        mission_mode_action.triggered.connect(self.start_mission_mode)
+        fun_menu.addAction(mission_mode_action)
+
+        # --- 新機能群のメニュー項目を追加 ---
+        # ウェブページ作曲家
+        composer_action = QAction("ウェブページ作曲家 (ON/OFF)", self)
+        composer_action.setCheckable(True)
+        composer_action.toggled.connect(self.toggle_webpage_composer)
+        fun_menu.addAction(composer_action)
+
+        # サイバー空間美術館 (ダミー)
+        cyber_gallery_action = QAction("サイバー空間美術館 (未実装)", self)
+        cyber_gallery_action.triggered.connect(lambda: QMessageBox.information(self, "サイバー空間美術館", "この機能は現在開発中です！"))
+        fun_menu.addAction(cyber_gallery_action)
+
+        # 歴史の深掘り (ダミー)
+        context_timeline_action = QAction("歴史の深掘り (未実装)", self)
+        context_timeline_action.triggered.connect(lambda: QMessageBox.information(self, "歴史の深掘り", "この機能は現在開発中です！"))
+        fun_menu.addAction(context_timeline_action)
+
+        # 感情駆動型インターフェース (ダミー)
+        mood_driven_ui_action = QAction("感情駆動型インターフェース (未実装)", self)
+        mood_driven_ui_action.triggered.connect(lambda: QMessageBox.information(self, "感情駆動型インターフェース", "この機能は現在開発中です！"))
+        fun_menu.addAction(mood_driven_ui_action)
+
+        # インタラクティブAIコンパニオン (ダミー)
+        ai_companion_action = QAction("AIコンパニオン (未実装)", self)
+        ai_companion_action.triggered.connect(lambda: QMessageBox.information(self, "AIコンパニオン", "より高度なAIコンパニオンは現在開発中です！"))
+        fun_menu.addAction(ai_companion_action)
+        
+        # ウェブページ香水 (ダミー)
+        webpage_perfumer_action = QAction("ウェブページ香水 (未実装)", self)
+        webpage_perfumer_action.triggered.connect(lambda: QMessageBox.information(self, "ウェブページ香水", "この機能は現在開発中です！"))
+        fun_menu.addAction(webpage_perfumer_action)
+
+        # フォント遊園地 (ダミー)
+        font_playground_action = QAction("フォント遊園地 (未実装)", self)
+        font_playground_action.triggered.connect(lambda: QMessageBox.information(self, "フォント遊園地", "この機能は現在開発中です！"))
+        fun_menu.addAction(font_playground_action)
+
+        # 共同閲覧モード (ダミー)
+        co_Browse_action = QAction("共同閲覧モード (未実装)", self)
+        co_Browse_action.triggered.connect(lambda: QMessageBox.information(self, "共同閲覧モード", "この機能は現在開発中です！"))
+        fun_menu.addAction(co_Browse_action)
+
+        # デジタルフットプリント可視化 (ダミー)
+        digital_footprint_action = QAction("デジタルフットプリント可視化 (未実装)", self)
+        digital_footprint_action.triggered.connect(lambda: QMessageBox.information(self, "デジタルフットプリント", "この機能は現在開発中です！"))
+        fun_menu.addAction(digital_footprint_action)
+        
+        # 設定メニュー
+        settings_action = QAction("設定を開く", self)
+        settings_action.triggered.connect(self.show_settings_dialog)
+        self.hamburger_menu.addSeparator()
+        self.hamburger_menu.addAction(settings_action)
+
+    def load_settings(self):
+        """設定をファイルから読み込む。"""
+        if os.path.exists(self.settings_file):
+            try:
+                with open(self.settings_file, 'r') as f:
+                    settings = json.load(f)
+                    # 新しい設定項目が存在しない場合にデフォルト値を設定
+                    settings.setdefault('rss_feeds', [])
+                    settings.setdefault('workspaces', {
+                        "デフォルト": {"urls": ["https://www.google.com", "https://github.com"]},
+                        "ニュース": {"urls": ["https://www.bbc.com/news", "https://www.nytimes.com"]}
+                    })
+                    settings.setdefault('saved_sessions', {})
+                    return settings
+            except json.JSONDecodeError:
+                print("設定ファイルが破損しています。新しく作成します。", file=sys.stderr)
+                return {}
+        return {}
+
+    def save_settings(self):
+        """設定をファイルに保存する。"""
+        # ウィンドウサイズと位置を保存
+        self.settings['window_size'] = [self.size().width(), self.size().height()]
+        self.settings['window_pos'] = [self.pos().x(), self.pos().y()]
+        
+        # current_search_engine_url も保存する
+        self.settings['current_search_engine_url'] = self.current_search_engine_url
+        
+        # self.settings の内容を settings_data にコピーしてから保存
+        self.settings_data.update(self.settings)
+
+        with open(self.settings_file, 'w') as f:
+            json.dump(self.settings_data, f, indent=4)
+
+    def closeEvent(self, event):
+        """ウィンドウが閉じられたときに設定を保存する。"""
+        self.save_settings()
+        event.accept()
+
+    def update_palette_from_system_theme(self):
+        """
+        システムテーマに基づいてパレットを更新する (macOSのみ)。
+        """
+        if platform.system() == "Darwin":
+            palette = QApplication.instance().palette()
+            self.setPalette(palette)
+            self.update_palette_based_on_color(palette.color(QPalette.ColorRole.Window))
+            
+    def update_palette_based_on_color(self, color):
+        """
+        基本色に基づいてライト/ダークモードを判定し、パレットを更新する。
+        """
+        if color.lightnessF() < 0.5: # 明度が0.5未満ならダークモード
+            theme_signal.theme_changed.emit('dark')
+        else: # 明度が0.5以上ならライトモード
+            theme_signal.theme_changed.emit('light')
+            
+    def update_palette(self, theme_mode):
+        """
+        グローバルシグナルから受け取ったテーマモードに基づいてパレットを更新する。
+        """
+        palette = QApplication.instance().palette()
+        if theme_mode == "dark":
+            palette.setColor(QPalette.ColorRole.Window, QColor(45, 45, 45))
+            palette.setColor(QPalette.ColorRole.WindowText, QColor(240, 240, 240))
+            palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+            palette.setColor(QPalette.ColorRole.AlternateBase, QColor(50, 50, 50))
+            palette.setColor(QPalette.ColorRole.Text, QColor(240, 240, 240))
+            palette.setColor(QPalette.ColorRole.Button, QColor(60, 60, 60))
+            palette.setColor(QPalette.ColorRole.ButtonText, QColor(240, 240, 240))
+            palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(50, 50, 50)) # ツールチップ背景
+            palette.setColor(QPalette.ColorRole.ToolTipText, QColor(240, 240, 240)) # ツールチップ文字
+            palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 0, 0)) # 明るいテキスト (エラーなど)
+            palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 120, 215)) # 選択されたアイテムの背景 (例: メニュー項目)
+            palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255)) # 選択されたアイテムの文字
+            palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(150, 150, 150)) # プレースホルダーテキスト
+            
+            # QSSを使ってメニューの背景色と文字色を設定
+            self.setStyleSheet("""
+                QMenu {
+                    background-color: #282828; /* 暗いグレーの背景 */
+                    color: #F0F0F0; /* 明るいグレーの文字色 */
+                    border: 1px solid #3A3A3A; /* ボーダー */
+                }
+                QMenu::item {
+                    padding: 5px 15px 5px 25px; /* アイテムのパディング */
+                }
+                QMenu::item:selected {
+                    background-color: #0078D7; /* 選択時の背景色 */
+                    color: #FFFFFF; /* 選択時の文字色 */
+                }
+                QMenu::separator {
+                    height: 1px;
+                    background: #505050;
+                    margin: 5px 0px;
+                }
+            """)
+
+        else: # "light"
+            # デフォルトのパレットに戻す
+            palette = QApplication.instance().style().standardPalette()
+            # ライトモードではQSSをリセット
+            self.setStyleSheet("") 
+        
+        QApplication.instance().setPalette(palette)
+        self.setPalette(palette)
+        
+        # ホーム画面のテーマも更新
+        for i in range(self.tabs.count()):
+            widget = self.tabs.widget(i)
+            if isinstance(widget, HomeWebView):
+                widget.page().runJavaScript(f"window.onThemeChanged('{theme_mode}');")
+    
+    def update_background_image(self):
+        """
+        設定された背景画像をブラウザの背景に設定する。
+        """
+        image_path = self.settings.get('background_image', '')
+        if os.path.exists(image_path):
+            style = f"""
+                QMainWindow {{
+                    background-image: url({image_path});
+                    background-repeat: no-repeat;
+                    background-position: center;
+                    background-attachment: fixed;
+                    background-size: cover;
+                }}
+            """
+            self.setStyleSheet(style)
+        else:
+            self.setStyleSheet("") # 背景画像を削除
+
+    # --- 機能メソッド ---
+    def add_new_tab(self, qurl=None, label="新規", is_private=False):
+        # 集中モードがアクティブな場合、URLをチェック
+        if self.is_preaching_mode_active:
+            target_url_str = qurl.toString() if qurl else ""
+            
+            # ホーム画面のURLがブロック対象に含まれていないかチェック
+            if target_url_str == 'about:home':
+                for fav_name, fav_url in self.settings['favorite_sites'].items():
+                    fav_domain = urlparse(fav_url).netloc
+                    for blocked_item in self.settings['blocked_sites']:
+                        if blocked_item in fav_domain or blocked_item in fav_url: 
+                            if not self.suppress_notifications:
+                                QMessageBox.warning(self, "集中ポーションが発動中！", 
+                                    f"ホーム画面にブロック対象サイト ({blocked_item}) が含まれています。集中モード中はアクセスできません。")
+                            return # タブの追加を中断
+
+            # 他のURLの集中モードチェック
+            for blocked_item in self.settings['blocked_sites']:
+                if blocked_item in target_url_str:
+                    if not self.suppress_notifications:
+                        QMessageBox.warning(self, "集中ポーションが発動中！", "さぼっちゃダメ！作業に戻りましょう！")
+                    return # ページ遷移を中断
+
+        # 起動時のURLが'about:home'の場合、独自のHomeWebViewインスタンスを作成
+        if qurl and qurl.toString() == 'about:home':
+            browser = HomeWebView(self, favorites=self.settings['favorite_sites'], custom_css=self.settings['custom_css'])
+            label = "ホーム"
+        else:
+            browser = QWebEngineView()
+            if qurl:
+                browser.setUrl(qurl)
+            else:
+                browser.setUrl(QUrl(self.settings['home_url'])) # URLが指定されなければホームに
+            
+        if is_private:
+            profile = QWebEngineProfile('IncognitoProfile' + str(id(browser)))
+            page = QWebEnginePage(profile, browser)
+            browser.setPage(page)
+            label = "㊙️ " + label
+            browser.setToolTip("プライベートモードです。")
+            
+        # ウェブページのカスタムCSSを適用
+        browser.page().runJavaScript(f"var style = document.createElement('style'); style.innerHTML = `{self.settings['custom_css']}`; document.head.appendChild(style);")
+
+        i = self.tabs.addTab(browser, label)
+        self.tabs.setCurrentIndex(i)
+        browser.urlChanged.connect(lambda q: self.update_url_bar(q, browser))
+        browser.titleChanged.connect(lambda title: self.tabs.setTabText(self.tabs.indexOf(browser), title))
+        browser.loadProgress.connect(self.update_progress_bar)
+        browser.urlChanged.connect(self.add_to_history)
+        browser.page().profile().downloadRequested.connect(self.handle_download)
+        browser.page().loadFinished.connect(lambda: self.update_status_bar(browser))
+        
+        if not self.suppress_notifications:
+            self.show_philosophy_on_new_tab()
+        
+        if self.is_retro_mode_active:
+            self.apply_retro_pixel_filter(browser)
+        
+        # ホーム画面のテーマを初期化
+        if isinstance(browser, HomeWebView):
+            theme_mode = 'dark' if QApplication.instance().palette().color(QPalette.ColorRole.Window).lightnessF() < 0.5 else 'light';
+            browser.page().runJavaScript(f"window.onThemeChanged('{theme_mode}');")
+            
+        # Webpage Composerのインスタンスを現在のタブに紐付ける
+        self.webpage_composer = WebpageComposer(browser)
+
+    def update_status_bar(self, browser):
+        """
+        現在のページ情報をステータスバーに表示する。
+        """
+        if self.suppress_notifications: return # 通知抑制中は表示しない
+
+        title = browser.title()
+        url = browser.url().toString()
+        status_text = f"ページ情報: {title} | {url}"
+        self.status_label.setText(status_text)
+        
+    def add_private_tab(self): self.add_new_tab(QUrl(self.settings['home_url']), 'プライベート', is_private=True)
+    def close_current_tab(self, index):
+        if self.tabs.count() < 2: return
+        self.tabs.removeTab(index)
+    def reset_sleep_timer(self): self.sleep_timer.start()
+    def activate_sleep_mode(self):
+        current_browser = self.tabs.currentWidget()
+        if current_browser:
+            current_browser.setUrl(QUrl("about:blank"))
+            self.tabs.setTabText(self.tabs.currentIndex(), "ZZZ...")
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("スリープモード: 😴 Zzz... 何か操作をすると復帰します。", 10000)
+    def navigate_or_search(self):
+        text = self.url_bar.text()
+        if not text:
+            # ランダムサイトジャンプ機能
+            self.jump_to_random_site()
+            return
+            
+        if self.is_preaching_mode_active:
+            for blocked_item in self.settings['blocked_sites']:
+                if blocked_item in text:
+                    if not self.suppress_notifications:
+                        QMessageBox.warning(self, "集中ポーションが発動中！", "さぼっちゃダメ！作業に戻りましょう！")
+                    return
+        if text.startswith("about:"):
+            # about:home などのカスタムURLを処理
+            if text == "about:home":
+                self.add_new_tab(QUrl("about:home"))
+            else:
+                self.tabs.currentWidget().setUrl(QUrl(text))
+            return
+        if text.startswith("http") or "." in text:
+            qurl = QUrl(text)
+            if qurl.scheme() == "": qurl.setScheme("http")
+            self.tabs.currentWidget().setUrl(qurl)
+        else:
+            search_url = self.current_search_engine_url + text
+            self.tabs.currentWidget().setUrl(QUrl(search_url))
+    def update_search_engine(self, engine_name): 
+        # self.settings['search_engines'] に対応するURLがあることを確認
+        self.current_search_engine_url = self.settings['search_engines'].get(engine_name, self.settings['search_engines']["Google"])
+        # settings_dataにも現在の検索エンジンURLを保存
+        self.settings_data['current_search_engine_url'] = self.current_search_engine_url
+
+
+    def navigate_home(self):
+        """
+        ホームボタンを押した際に設定されているホームURLに遷移する。
+        """
+        self.tabs.currentWidget().setUrl(QUrl(self.settings['home_url']))
+
+    def update_url_bar(self, q, browser):
+        if self.tabs.currentWidget() == browser: self.url_bar.setText(q.toString())
+    def update_url_bar_on_tab_change(self, index):
+        current_browser = self.tabs.currentWidget()
+        if current_browser: self.url_bar.setText(current_browser.url().toString())
+    def update_progress_bar(self, progress):
+        if self.suppress_notifications: return # 通知抑制中は表示しない
+
+        if progress < 100:
+            self.progress_bar.setValue(progress)
+            self.progress_bar.setVisible(True)
+        else: self.progress_bar.setVisible(False)
+    def set_volume(self, volume):
+        current_browser = self.tabs.currentWidget()
+        if current_browser:
+            current_browser.page().setAudioMuted(volume == 0)
+            if not self.suppress_notifications:
+                if volume > 0: self.statusBar().showMessage("音量: ミュート解除", 2000)
+                else: self.statusBar().showMessage("音量: ミュート", 2000)
+    def zoom_in(self): self.tabs.currentWidget().setZoomFactor(self.tabs.currentWidget().zoomFactor() + 0.1)
+    def zoom_out(self): self.tabs.currentWidget().setZoomFactor(self.tabs.currentWidget().zoomFactor() - 0.1)
+    def reset_zoom(self): self.tabs.currentWidget().setZoomFactor(1.0)
+    def toggle_fullscreen(self):
+        if self.isFullScreen(): self.showNormal()
+        else: self.showFullScreen()
+    def open_dev_tools(self):
+        if not self.suppress_notifications:
+            QMessageBox.information(self, "開発者ツール", "この環境では開発者ツールは利用できません。")
+    def save_page_as_pdf(self):
+        current_browser = self.tabs.currentWidget()
+        if not current_browser: return
+        file_path, _ = QFileDialog.getSaveFileName(self, "PDFとして保存", "", "PDF Files (*.pdf)")
+        if file_path:
+            if not file_path.endswith(".pdf"): file_path += ".pdf"
+            current_browser.page().printToPdf(file_path)
+            if not self.suppress_notifications:
+                self.statusBar().showMessage(f"ページをPDFで保存しました: {file_path}", 5000)
+    def take_screenshot(self):
+        current_browser = self.tabs.currentWidget()
+        if not current_browser: return
+        image = QImage(current_browser.size(), QImage.Format.Format_ARGB32_Premultiplied)
+        painter = QPainter(image)
+        current_browser.render(painter)
+        painter.end()
+        file_path, _ = QFileDialog.getSaveFileName(self, "スクリーンショットを保存", "", "Images (*.png *.jpg)")
+        if file_path:
+            image.save(file_path)
+            if not self.suppress_notifications:
+                self.statusBar().showMessage(f"スクリーンショットを保存しました: {file_path}", 5000)
+    def find_in_page(self):
+        current_browser = self.tabs.currentWidget()
+        if not current_browser: return
+        text, ok = QInputDialog.getText(self, "ページ内検索", "検索するキーワードを入力してください:")
+        if ok and text:
+            current_browser.findText(text)
+            if not self.suppress_notifications:
+                self.statusBar().showMessage(f"ページ内で '{text}' を検索中...", 3000)
+    def generate_qr_code(self):
+        current_url = self.tabs.currentWidget().url().toString()
+        if not current_url:
+            if not self.suppress_notifications:
+                QMessageBox.warning(self, "QRコード生成", "無効なURLです。")
+            return
+        qr_img = qrcode.make(current_url)
+        img_qt = ImageQt(qr_img.convert("RGBA"))
+        pixmap = QPixmap.fromImage(img_qt)
+        msg = QMessageBox(self)
+        msg.setWindowTitle("QRコード")
+        msg.setText(f"現在のURLのQRコード:\n{current_url}")
+        msg.setIconPixmap(pixmap)
+        if not self.suppress_notifications:
+            msg.exec()
+    def translate_page(self):
+        current_browser = self.tabs.currentWidget()
+        if current_browser:
+            js_code = """
+                if (typeof google !== 'undefined' && google.translate) {
+                    google.translate.translateInit(function() {
+                        google.translate.translatePage('ja');
+                    });
+                } else {
+                    alert('翻訳機能は利用できません。');
+                }
+            """
+            current_browser.page().runJavaScript(js_code)
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("ページの翻訳を試みています...", 3000)
+                QMessageBox.information(self, "自動翻訳", "これはシミュレートされた機能です。")
+
+    def show_notes_dialog(self):
+        current_tab_index = self.tabs.currentIndex()
+        if current_tab_index not in self.notes:
+            self.notes[current_tab_index] = ""
+        notes_dialog = QDialog(self)
+        notes_dialog.setWindowTitle("シンプルメモ帳"); notes_dialog.setFixedSize(400, 300)
+        layout = QVBoxLayout(notes_dialog); text_edit = QPlainTextEdit()
+        text_edit.setPlaceholderText("ここにメモを入力してください..."); text_edit.setPlainText(self.notes[current_tab_index])
+        layout.addWidget(text_edit); button_layout = QHBoxLayout()
+        ok_button = QPushButton("OK"); cancel_button = QPushButton("キャンセル")
+        button_layout.addStretch(1); button_layout.addWidget(ok_button); button_layout.addWidget(cancel_button)
+        layout.addLayout(button_box); ok_button.clicked.connect(notes_dialog.accept); cancel_button.clicked.connect(notes_dialog.reject)
+        if notes_dialog.exec(): self.notes[current_tab_index] = text_edit.toPlainText();
+        if not self.suppress_notifications:
+            self.statusBar().showMessage("メモを保存しました。", 2000)
+
+    def show_settings_dialog(self):
+        """設定ダイアログを開き、設定を更新する。"""
+        # 現在の設定とバージョン情報を渡す
+        settings_dialog = SettingsDialog(self, self.settings_data, browser_version=self.browser_version) 
+        if settings_dialog.exec():
+            # OKが押された場合に設定を適用
+            new_settings = settings_dialog.get_settings()
+            
+            # self.settings_data を更新
+            self.settings_data.update(new_settings)
+            
+            # self.settings も self.settings_data から更新
+            self.settings = self.settings_data.copy()
+
+            # 検索エンジンを更新
+            self.current_search_engine_url = self.settings_data['current_search_engine_url']
+            self.search_engine_combo.setCurrentText(self.settings_data['search_engine_name']) # コンボボックスの表示も更新
+
+            # お気に入りツールバーとブックマークメニューを更新
+            self.bookmarks = self.settings['favorite_sites']
+            self.update_bookmarks_menu()
+            self.update_favorite_sites_toolbar()
+            
+            # 背景画像を更新
+            self.update_background_image()
+            
+            # ナイトモードを再チェック
+            self.check_night_mode()
+            
+            # RSSフィードも更新
+            self.check_rss_feeds_for_new_articles()
+
+            # ワークスペースメニューを更新
+            self.update_workspace_menu()
+
+            self.save_settings() # 変更をファイルに保存
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("設定が保存されました！", 3000)
+
+    def update_bookmarks_menu(self):
+        self.bookmarks_menu.clear()
+        for name, url in self.bookmarks.items():
+            action = QAction(name, self)
+            action.triggered.connect(lambda checked, u=url, n=name: self.add_new_tab(QUrl(u), n))
+            self.bookmarks_menu.addAction(action)
+        self.bookmarks_menu.addSeparator()
+        add_bookmark_action = QAction("現在のページをブックマーク", self)
+        add_bookmark_action.triggered.connect(self.add_current_page_as_bookmark)
+        self.bookmarks_menu.addAction(add_bookmark_action)
+    def add_current_page_as_bookmark(self):
+        current_browser = self.tabs.currentWidget()
+        url = current_browser.url().toString()
+        title = current_browser.title() if current_browser.title() else url
+        new_title, ok = QInputDialog.getText(self, 'ブックマークを追加', 'ブックマーク名:', text=title)
+        if ok and new_title:
+            self.bookmarks[new_title] = url
+            # settings_data にも反映
+            self.settings_data['favorite_sites'][new_title] = url
+            self.update_bookmarks_menu()
+            self.update_favorite_sites_toolbar() # ツールバーも更新
+            self.save_settings() # 保存
+            print(f"ブックマークに追加: {new_title} ({url})")
+            
+    def get_favicon(self, url):
+        """指定されたURLからファビコンを取得する。"""
+        try:
+            domain = urlparse(url).netloc
+            favicon_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=32"
+            response = requests.get(favicon_url, timeout=2)
+            if response.status_code == 200:
+                img_data = BytesIO(response.content)
+                img = Image.open(img_data)
+                # 画像を16x16にリサイズ
+                img = img.resize((16, 16), Image.LANCZOS)
+                qimage = ImageQt(img.convert("RGBA"))
+                return QIcon(QPixmap.fromImage(qimage))
+        except Exception as e:
+            print(f"ファビコンの取得に失敗しました: {e}", file=sys.stderr)
+            pass
+        return QIcon() # 失敗時は空のアイコンを返す
+
+    def update_favorite_sites_toolbar(self):
+        self.favorites_toolbar.clear()
+        for name, url in self.settings['favorite_sites'].items():
+            action = QAction(name, self)
+            action.triggered.connect(lambda checked, u=url, n=name: self.add_new_tab(QUrl(u), n))
+            
+            # ファビコンを取得してアイコンとして設定
+            icon = self.get_favicon(url)
+            if not icon.isNull():
+                action.setIcon(icon)
+            
+            self.favorites_toolbar.addAction(action)
+
+    def handle_download(self, download_request):
+        suggested_path = os.path.join(download_request.downloadDirectory(), download_request.suggestedFileName())
+        print(f"ダウンロード開始: {suggested_path}")
+        file_path, _ = QFileDialog.getSaveFileName(self, "ファイルを保存", suggested_path)
+        if file_path:
+            download_request.setDownloadDirectory(os.path.dirname(file_path))
+            download_request.setFileName(os.path.basename(file_path))
+            download_request.accept()
+            print(f"保存先: {file_path}")
+            download_request.stateChanged.connect(lambda state: self.on_download_state_changed(download_request, state))
+    def on_download_state_changed(self, download_request, state):
+        if self.suppress_notifications: return
+
+        full_path = os.path.join(download_request.downloadDirectory(), download_request.suggestedFileName())
+        if state == QWebEngineDownloadRequest.DownloadInterrupted: print(f"ダウンロードが中断されました: {full_path}")
+        elif state == QWebEngineDownloadRequest.DownloadCompleted: print(f"ダウンロードが完了しました: {full_path}")
+    def add_to_history(self, qurl):
+        url_str = qurl.toString()
+        if self.history and self.history[-1][1] == url_str: return
+        title = self.tabs.currentWidget().title() if self.tabs.currentWidget() else url_str
+        self.history.append((title, url_str))
+        if len(self.history) > 100: self.history.pop(0)
+        self.update_history_menu()
+    def update_history_menu(self):
+        self.history_menu.clear()
+        for title, url in reversed(self.history):
+            action = QAction(title, self)
+            action.triggered.connect(lambda checked, u=url, t=title: self.add_new_tab(QUrl(u), t))
+            self.history_menu.addAction(action)
+        self.history_menu.addSeparator()
+        clear_history_action = QAction("履歴をクリア", self)
+        clear_history_action.triggered.connect(self.clear_history)
+        self.history_menu.addAction(clear_history_action)
+    def clear_history(self):
+        self.history = []
+        self.update_history_menu()
+        print("履歴をクリアしました。")
+        if not self.suppress_notifications:
+            self.statusBar().showMessage("履歴をクリアしました。", 3000)
+
+    def toggle_preaching_mode(self, checked):
+        self.is_preaching_mode_active = checked
+        self.suppress_notifications = checked # 通知抑制フラグを設定
+
+        if checked:
+            duration, ok = QInputDialog.getInt(self, "集中ポーション", "何分間集中しますか？", value=30, min=1, max=120)
+            if ok:
+                self.blocked_timer.start(duration * 60 * 1000)
+                if not self.suppress_notifications:
+                    QMessageBox.information(self, "集中ポーション", f"{duration}分間、集中モードがONになりました。さぼっちゃダメですよ！")
+            else: 
+                self.is_preaching_mode_active = False
+                self.suppress_notifications = False
+        else:
+            self.blocked_timer.stop()
+            if not self.suppress_notifications:
+                QMessageBox.information(self, "集中ポーション", "ポーションの効果が切れました。さぼっても大丈夫です...")
+            self.suppress_notifications = False # 必ず通知抑制を解除
+
+    def unblock_sites(self):
+        self.is_preaching_mode_active = False
+        self.suppress_notifications = False
+        if not self.suppress_notifications:
+            self.statusBar().showMessage("集中ポーションの効果が切れました！", 5000)
+
+    def activate_timemachine(self):
+        current_url = self.tabs.currentWidget().url().toString()
+        archive_url = f"https://web.archive.org/web/*/{current_url}"
+        self.add_new_tab(QUrl(archive_url), "タイムマシン")
+    def show_philosophy_on_new_tab(self):
+        if self.suppress_notifications: return
+
+        philosophies = [
+            "インターネットの向こう側には何があるのだろうか？", "今見ている画面は誰かの夢なのだろうか？",
+            "「検索」は私たちを賢くするのか、それとも依存させるだけなのか？",
+            "クリックする前と後で、自分は本当に同じなのだろうか？",
+            "もしAIに意識があったら、どんなウェブサイトを夢見るだろうか？",
+            "エラーメッセージは宇宙からの手紙なのだろうか？",
+        ]
+        self.statusBar().showMessage(f"今日の哲学: '{random.choice(philosophies)}'", 7000)
+    def toggle_time_travel_mode(self):
+        current_browser = self.tabs.currentWidget()
+        if not current_browser: return
+        mode, ok = QInputDialog.getItem(self, "タイムトラベルモード", "どの時代にタイムトラベルしますか？", ["過去 (CSSなし)", "未来 (派手なCSS)", "現在 (リセット)"], 0, False)
+        if ok and mode:
+            if mode == "過去 (CSSなし)":
+                current_browser.page().runJavaScript("document.querySelectorAll('link[rel=stylesheet],style').forEach(el => el.remove());")
+                if not self.suppress_notifications:
+                    self.statusBar().showMessage("タイムトラベル成功！過去のウェブサイトに到着しました。", 5000)
+            elif mode == "未来 (派手なCSS)":
+                css = """
+                    body { transition: background-color 2s ease-in-out; }
+                    * { border: 2px solid neonpink !important; box-shadow: 0 0 10px 5px cyan !important; animation: flicker 0.5s infinite alternate; }
+                    @keyframes flicker { from { opacity: 1; } to { opacity: 0.8; } }
+                """
+                current_browser.page().runJavaScript(f"var style = document.createElement('style'); style.id = 'cyberpunk-style'; style.innerHTML = `{css}`; document.head.appendChild(style);")
+                if not self.suppress_notifications:
+                    self.statusBar().showMessage("タイムトラベル成功！未来のウェブサイトに到着しました。", 5000)
+            else:
+                current_browser.reload();
+                if not self.suppress_notifications:
+                    self.statusBar().showMessage("現在に戻りました。", 3000)
+    
+    def start_ai_chat(self):
+        current_browser = self.tabs.currentWidget()
+        if current_browser:
+            question, ok = QInputDialog.getText(self, "AIアシスタント", "質問を入力してください:")
+            if ok and question:
+                if not self.suppress_notifications:
+                    self.statusBar().showMessage("AIアシスタントが考えています...", 3000)
+                # ここにAI API呼び出しのロジックを実装
+                # 例: APIから応答を取得
+                response_from_ai = self.get_ai_response(question)
+                if not self.suppress_notifications:
+                    QMessageBox.information(self, "AIアシスタントからの返信", response_from_ai)
+
+    def get_ai_response(self, question):
+        # AI応答をシミュレート
+        if "猫" in question or "ねこ" in question: return "ニャー。猫は液体のようですからね。"
+        elif "天気" in question: return "今日の天気は散歩にぴったりです。お出かけしますか？"
+        elif "人生の意味" in question: return "その質問は量子力学のようなものです。答えはあなたの中にあります。"
+        else: return "その質問は私の知識を超えています。もっと哲学的なことを聞いてみてください。"
+    
+    def toggle_nostalgia_filter(self, checked):
+        current_browser = self.tabs.currentWidget()
+        if not current_browser: return
+        if checked:
+            filter_css = """
+                body::before {content:'';position:fixed;top:0;left:0;width:100%;height:100%;background:repeating-linear-gradient(0deg, transparent, rgba(0,0,0,0.1) 1px, transparent 2px);z-index:9999;pointer-events:none;opacity:0.5;}
+                body::after {content:'';position:fixed;top:0;left:0;width:100%;height:100%;box-shadow:inset 0 0 100px 50px rgba(0,0,0,0.5);z-index:9999;pointer-events:none;}
+            """
+            current_browser.page().runJavaScript(f"var style = document.createElement('style'); style.id = 'nostalgia-filter'; style.innerHTML = `{filter_css}`; document.head.appendChild(style);")
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("ノスタルジアフィルターON！古き良き思い出に浸りましょう。", 3000)
+        else:
+            current_browser.page().runJavaScript("var style = document.getElementById('nostalgia-filter'); if(style) style.remove();")
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("ノスタルジアフィルターOFF。", 3000)
+    def toggle_cyberpunk_mode(self, checked):
+        current_browser = self.tabs.currentWidget()
+        if not current_browser: return
+        if checked:
+            cyberpunk_css = """
+                body { background-color: black !important; color: limegreen !important; filter: drop-shadow(0 0 1px limegreen); }
+                a { color: cyan !important; }
+                * { border-color: limegreen !important; }
+                input, textarea, select, button { background-color: #1a1a1a !important; color: limegreen !important; border: 1px solid cyan !important; }
+            """
+            current_browser.page().runJavaScript(f"var style = document.createElement('style'); style.id = 'cyberpunk-style'; style.innerHTML = `{cyberpunk_css}`; document.head.appendChild(style);")
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("サイバーパンクモードON！ネオンの光が輝く世界へようこそ。", 3000)
+        else:
+            current_browser.page().runJavaScript("var style = document.getElementById('cyberpunk-style'); if(style) style.remove();")
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("サイバーパンクモードOFF。", 3000)
+    def set_easter_eggs(self):
+        mod_key = "Ctrl" if platform.system() != "Darwin" else "Cmd"
+        theme_action = QAction("テーマを変更", self); theme_action.setShortcut(QKeySequence(f"{mod_key}+Alt+T")); theme_action.triggered.connect(self.change_theme); self.addAction(theme_action)
+        proverb_action = QAction("隠された哲学", self); proverb_action.setShortcut(QKeySequence(f"{mod_key}+Shift+S")); proverb_action.triggered.connect(self.show_proverb); self.addAction(proverb_action)
+    def change_theme(self):
+        palette = self.palette(); random_color = QColor(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+        palette.setColor(QPalette.ColorRole.Window, random_color); palette.setColor(QPalette.ColorRole.Base, random_color.lighter(120)); palette.setColor(QPalette.ColorRole.AlternateBase, random_color.darker(120)); palette.setColor(QPalette.ColorRole.Text, random_color.lighter(200)); palette.setColor(QPalette.ColorRole.Button, random_color.darker(120)); palette.setColor(QPalette.ColorRole.ButtonText, random_color.lighter(200))
+        self.setPalette(palette); QApplication.setPalette(palette)
+        if not self.suppress_notifications:
+            self.statusBar().showMessage(f"テーマの色がランダムに変更されました！", 3000)
+    def show_proverb(self):
+        proverbs = ["人生は短い、しかしタブは無限である。", "眠いなら眠れ。それも生産性の一部だ。", "完璧なコードなどない。動けばそれで十分だ。", "最大のバグは睡眠不足だ。", "デバッグは探偵の仕事だ。手がかりはエラーメッセージにある。",]
+        if not self.suppress_notifications:
+            QMessageBox.information(self, "隠された哲学", random.choice(proverbs))
+    
+    def start_auto_scroll(self):
+        """自動スクロールを開始する。"""
+        if not self.auto_scroll_timer.isActive():
+            self.auto_scroll_timer.start()
+            if not self.suppress_notifications:
+                self.statusBar().showMessage(f"自動スクロールを開始しました。速度: {self.scroll_speed}px/tick", 3000)
+
+    def stop_auto_scroll(self):
+        """自動スクロールを停止する。"""
+        if self.auto_scroll_timer.isActive():
+            self.auto_scroll_timer.stop()
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("自動スクロールを停止しました。", 3000)
+
+    def set_scroll_speed(self):
+        """スクロール速度を設定するダイアログを表示する。"""
+        speed, ok = QInputDialog.getInt(self, "スクロール速度の設定", "スクロール速度を入力してください (1-50):",
+                                        value=self.scroll_speed, min=1, max=50)
+        if ok:
+            self.scroll_speed = speed
+            if not self.suppress_notifications:
+                self.statusBar().showMessage(f"スクロール速度を {self.scroll_speed}px/tick に設定しました。", 3000)
+
+    def perform_auto_scroll(self):
+        """ウェブページを自動的にスクロールする。"""
+        current_browser = self.tabs.currentWidget()
+        if current_browser:
+            # JavaScriptを使ってスクロールを実行
+            current_browser.page().runJavaScript(f"window.scrollBy(0, {self.scroll_speed});")
+
+    # --- 新機能の実装 ---
+    def summarize_page(self):
+        """AIページ要約機能"""
+        current_browser = self.tabs.currentWidget()
+        if not current_browser: return
+        
+        # JavaScriptを実行してページ内のテキストコンテンツを取得
+        js_code = "document.body.innerText;"
+        current_browser.page().runJavaScript(js_code, self.handle_summary_result)
+
+    def handle_summary_result(self, text):
+        if not text:
+            if not self.suppress_notifications:
+                QMessageBox.warning(self, "AIによる要約", "要約するテキストが見つかりませんでした。")
+            return
+
+        # AI要約ロジックをシミュレート
+        sentences = re.split(r'[。.]', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        # 最初の5文を要約として抽出 (単純な要約)
+        summary = "。 ".join(sentences[:5]) + "。"
+        
+        if not self.suppress_notifications:
+            QMessageBox.information(self, "AIによる要約", summary)
+            self.statusBar().showMessage("ページの要約が完了しました！", 5000)
+
+    def analyze_website_mood(self):
+        """ウェブサイトのムード分析機能"""
+        current_browser = self.tabs.currentWidget()
+        if not current_browser: return
+
+        # JavaScriptを実行してCSSとキーワードを抽出
+        js_code = r"""
+            var colors = {};
+            var styleSheets = document.styleSheets;
+            for(var i = 0; i < styleSheets.length; i++){
+                try {
+                    var rules = styleSheets[i].cssRules;
+                    for(var j = 0; j < rules.length; j++){
+                        if(rules[j].style){
+                            var cssText = rules[j].style.cssText;
+                            var matches = cssText.matchAll(/rgb\((\d+),\s*(\d+),\s*(\d+)\)|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}/g);
+                            for(var match of matches) {
+                                var color = match[0];
+                                colors[color] = (colors[color] || 0) + 1;
+                            }
+                        }
+                    }
+                } catch(e) { /* クロスオリジンのスタイルシートエラーは無視 */ }
+            }
+            var text = document.body.innerText;
+            var keywords = text.split(/\s+/);
+            JSON.stringify({ colors: colors, keywords: keywords.slice(0, 500) });
+        """
+        current_browser.page().runJavaScript(js_code, self.handle_mood_analysis_result)
+
+    def handle_mood_analysis_result(self, json_data):
+        try:
+            data = json.loads(json_data)
+            colors = data.get('colors', {})
+            keywords = data.get('keywords', [])
+
+            # --- 単純なムード判定ロジック ---
+            mood_scores = {
+                'エネルギッシュ': 0,
+                '穏やか': 0,
+                'サイバーパンク': 0,
+                '真面目': 0
+            }
+
+            # 1. 色分析
+            for color_str, count in colors.items():
+                if '#' in color_str:
+                    r, g, b = int(color_str[1:3], 16), int(color_str[3:5], 16), int(color_str[5:7], 16)
+                else: # rgb(r, g, b)形式
+                    r, g, b = map(int, re.findall(r'\d+', color_str))
+
+                if r > 150 and g < 100 and b < 100: mood_scores['エネルギッシュ'] += count # 赤っぽい色
+                if g > 150 and b > 150: mood_scores['穏やか'] += count # 青緑色
+                if g > 200 and b < 50 and r < 50: mood_scores['サイバーパンク'] += count # ネオングリーン
+                if r < 100 and g < 100 and b < 100: mood_scores['真面目'] += count # 黒っぽい色
+
+            # 2. キーワード分析 (非常に単純な例)
+            for keyword in keywords:
+                if keyword in ['fun', 'great', 'exciting', 'exciting']: mood_scores['エネルギッシュ'] += 1
+                if keyword in ['calm', 'quiet', 'relaxing', 'peaceful']: mood_scores['穏やか'] += 1
+                if keyword in ['technology', 'future', 'data', 'cyber']: mood_scores['サイバーパンク'] += 1
+                if keyword in ['paper', 'research', 'analysis', 'information']: mood_scores['真面目'] += 1
+
+            total_score = sum(mood_scores.values())
+            if total_score == 0:
+                result_mood = "判定不能なムード..."
+            else:
+                result_mood = max(mood_scores, key=mood_scores.get)
+
+            if not self.suppress_notifications:
+                QMessageBox.information(self, "ウェブサイトのムード分析", f"このサイトのムードは**'{result_mood}'**です！\n\n(分析結果は主観的なものです。)")
+                self.statusBar().showMessage(f"サイトのムードを分析しました: {result_mood}", 5000)
+
+        except Exception as e:
+            if not self.suppress_notifications:
+                QMessageBox.critical(self, "エラー", f"ムード分析に失敗しました: {e}")
+
+    def toggle_retro_pixel_mode(self, checked):
+        """ウェブページ上の画像をピクセル化する。"""
+        self.is_retro_mode_active = checked
+        if checked:
+            # JavaScriptで全ての画像をピクセル化
+            js_code = """
+                document.querySelectorAll('img').forEach(img => {
+                    var canvas = document.createElement('canvas');
+                    var context = canvas.getContext('2d');
+                    var width = img.naturalWidth;
+                    var height = img.naturalHeight;
+                    canvas.width = width;
+                    canvas.height = height;
+
+                    context.webkitImageSmoothingEnabled = false;
+                    context.mozImageSmoothingEnabled = false;
+                    context.imageSmoothingEnabled = false;
+
+                    // 低解像度で描画してから拡大
+                    var pixelSize = 16;
+                    context.drawImage(img, 0, 0, width / pixelSize, height / pixelSize);
+                    context.drawImage(canvas, 0, 0, width / pixelSize, height / pixelSize, 0, 0, width, height);
+
+                    img.src = canvas.toDataURL();
+                });
+            """
+            current_browser = self.tabs.currentWidget()
+            if current_browser:
+                current_browser.page().runJavaScript(js_code)
+                if not self.suppress_notifications:
+                    self.statusBar().showMessage("レトロピクセルモードON！ピクセルアートの世界へようこそ。", 3000)
+        else:
+            # タブをリロードして元に戻す
+            self.tabs.currentWidget().reload()
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("レトロピクセルモードOFF。", 3000)
+    
+    def activate_cleaning_robot(self):
+        """画面にお掃除ロボットを表示する。"""
+        current_browser = self.tabs.currentWidget()
+        if not current_browser: return
+        
+        # JavaScriptでアニメーションと要素削除をシミュレート
+        js_code = """
+            // 小さなロボット要素を作成
+            var robot = document.createElement('div');
+            robot.style.position = 'fixed';
+            robot.style.width = '50px';
+            robot.style.height = '50px';
+            robot.style.background = 'url("https://www.flaticon.com/svg/v2/search/p/13444/13444652.svg") no-repeat center center / contain';
+            robot.style.bottom = '10px';
+            robot.style.right = '10px';
+            robot.style.zIndex = '99999';
+            robot.style.transition = 'transform 1s ease-in-out';
+            document.body.appendChild(robot);
+
+            // ロボットをアニメーションさせる
+            var positions = [
+                {x: 100, y: -200}, {x: -300, y: -50}, {x: 50, y: 150},
+                {x: -150, y: -150}, {x: 200, y: 10}, {x: -200, y: 200}
+            ];
+            var i = 0;
+            var interval = setInterval(function() {
+                if (i >= positions.length) {
+                    clearInterval(interval);
+                    robot.remove(); // アニメーション後にロボットを削除
+                    return;
+                }
+                var pos = positions[i];
+                robot.style.transform = `translate(${pos.x}px, ${pos.y}px) rotate(${i * 60}deg)`;
+                i++;
+            }, 1000);
+
+            // クリーニングをシミュレート (ランダムなdivをいくつか削除)
+            var all_divs = document.querySelectorAll('div');
+            for(var i = 0; i < 5; i++){
+                var random_div = all_divs[Math.floor(Math.random() * all_divs.length)];
+                if(random_div && random_div.parentElement){
+                    random_div.style.opacity = 0;
+                    random_div.style.transition = 'opacity 0.5s ease-out';
+                    setTimeout(() => random_div.remove(), 500);
+                }
+            }
+        """
+        current_browser.page().runJavaScript(js_code)
+        if not self.suppress_notifications:
+            self.statusBar().showMessage("お掃除ロボットが起動しました！ブラウザをきれいにしています。", 5000)
+
+    def check_night_mode(self):
+        """
+        現在の時刻に基づいてナイトモードをON/OFFする。
+        """
+        current_hour = QTime.currentTime().hour()
+        start_hour = self.settings.get('night_mode_start', 22)
+        end_hour = self.settings.get('night_mode_end', 7)
+        
+        is_night = False
+        if start_hour <= end_hour: # 例: 22時から7時まで
+            if start_hour <= current_hour < end_hour:
+                is_night = True
+        else: # 例: 7時から22時まで (この範囲外を夜とみなす)
+            if current_hour >= start_hour or current_hour < end_hour:
+                is_night = True
+        
+        # 現在のテーマを確認
+        current_theme_is_dark = QApplication.instance().palette().color(QPalette.ColorRole.Window).lightnessF() < 0.5
+        
+        if is_night and not current_theme_is_dark:
+            theme_signal.theme_changed.emit('dark')
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("ナイトモードON。目に優しいダークテーマに切り替わりました。", 3000)
+        elif not is_night and current_theme_is_dark:
+            theme_signal.theme_changed.emit('light')
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("ナイトモードOFF。ライトテーマに戻りました。", 3000)
+
+    def jump_to_random_site(self):
+        """
+        履歴からランダムなサイトにジャンプする。
+        """
+        if self.history:
+            random_entry = random.choice(self.history)
+            url = random_entry[1]
+            title = random_entry[0]
+            self.add_new_tab(QUrl(url), title)
+            if not self.suppress_notifications:
+                self.statusBar().showMessage(f"ランダムサイトジャンプ！'{title}'にアクセスします。", 5000)
+        else:
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("ジャンプできる履歴がありません。", 3000)
+
+    def analyze_sentiment(self):
+        """
+        ページの感情を分析する (シンプル版)。
+        """
+        current_browser = self.tabs.currentWidget()
+        if not current_browser: return
+        
+        js_code = "document.body.innerText;"
+        current_browser.page().runJavaScript(js_code, self.handle_sentiment_result)
+
+    def handle_sentiment_result(self, text):
+        if not text:
+            if not self.suppress_notifications:
+                QMessageBox.warning(self, "感情分析", "分析するテキストが見つかりませんでした。")
+            return
+
+        # 感情キーワードの単純なリスト
+        positive_words = ['great', 'best', 'fun', 'happy', 'success', 'beautiful', 'hope', '素晴らしい', '最高', '楽しい', '幸せ', '成功', '美しい', '希望']
+        negative_words = ['terrible', 'worst', 'sad', 'painful', 'anger', 'failure', 'ugly', 'despair', 'ひどい', '最悪', '悲しい', 'つらい', '怒り', '失敗', '醜い', '絶望']
+
+        positive_score = sum(1 for word in positive_words if word in text.lower())
+        negative_score = sum(1 for word in negative_words if word in text.lower())
+        
+        total_score = positive_score + negative_score
+        
+        if total_score == 0:
+            sentiment_result = "中立"
+        elif positive_score > negative_score:
+            sentiment_result = "ポジティブ"
+        elif negative_score > positive_score:
+            sentiment_result = "ネガティブ"
+        else:
+            sentiment_result = "中立" # 同点の場合
+
+        sentiment_info = f"""
+        **感情分析結果:**
+        - **全体:** {sentiment_result}
+        - **ポジティブスコア:** {positive_score}
+        - **ネガティブスコア:** {negative_score}
+
+        この結果は単純なキーワード分析に基づいています。
+        """
+        if not self.suppress_notifications:
+            QMessageBox.information(self, "ページ内感情分析", sentiment_info)
+            self.statusBar().showMessage(f"ページの感情を分析しました: {sentiment_result}", 5000)
+
+    def toggle_rain_sound_mode(self, checked):
+        """
+        バーチャル雨音モードをON/OFFする。
+        """
+        if checked:
+            self.is_rain_mode_active = True
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("バーチャル雨音モードON。作業に集中してください。", 3000)
+        else:
+            self.is_rain_mode_active = False
+            if not self.suppress_notifications:
+                self.statusBar().showMessage("バーチャル雨音モードOFF。", 3000)
+            
+    def start_mission_mode(self):
+        """
+        ランダムなミッションを提示する。
+        """
+        missions = [
+            "「猫」と検索して、一番かわいい猫を見つけよう！",
+            "YouTubeにアクセスせずに30分間リサーチをしてみよう。",
+            "今日の年月日を3つの異なるウェブサイトで見つけよう！",
+            "URLバーに「about:blank」と入力して、心の空白と向き合ってみよう。",
+            "開いているタブを全部閉じよう。そして、新しい世界に飛び出そう。",
+            "Wikipediaのランダム記事に5回ジャンプして、知識の冒険を楽しもう。",
+            "集中ポーションを飲んで、60分間SNSを開かないように頑張ろう！",
+            "お気に入りのウェブサイトのファビコンのスクリーンショットを撮って保存しよう。",
+        ]
+        
+        random_mission = random.choice(missions)
+        if not self.suppress_notifications:
+            QMessageBox.information(self, "ミッション開始！", f"あなたのミッションは…**'{random_mission}'**\n\nミッションの成功を祈ります！")
+            self.statusBar().showMessage("新しいミッションが割り当てられました。", 5000)
+
+    def toggle_webpage_composer(self, checked):
+        """
+        ウェブページ作曲家モードをON/OFFする。
+        """
+        if self.webpage_composer:
+            if checked:
+                self.webpage_composer.start_composing()
+            else:
+                self.webpage_composer.stop_composing()
+        else:
+            # 初回起動時にWebpageComposerを初期化
+            current_browser = self.tabs.currentWidget()
+            if current_browser:
+                self.webpage_composer = WebpageComposer(current_browser)
+                self.webpage_composer.start_composing()
+            else:
+                if not self.suppress_notifications:
+                    QMessageBox.warning(self, "ウェブページ作曲家", "タブが開かれていないため、作曲家を起動できません。")
+
+    # --- セッション管理機能 ---
+    def save_current_session(self):
+        """現在のタブの状態をセッションとして保存する。"""
+        session_name, ok = QInputDialog.getText(self, "セッションを保存", "セッションの名前を入力してください:")
+        if ok and session_name:
+            current_tabs_data = []
+            for i in range(self.tabs.count()):
+                browser = self.tabs.widget(i)
+                current_tabs_data.append({
+                    'url': browser.url().toString(),
+                    'title': browser.title()
+                })
+            self.settings_data['saved_sessions'][session_name] = current_tabs_data
+            self.save_settings()
+            self.update_session_menu()
+            if not self.suppress_notifications:
+                self.statusBar().showMessage(f"セッション '{session_name}' を保存しました。", 3000)
+
+    def load_session(self, session_name):
+        """保存されたセッションを復元する。"""
+        if session_name in self.settings_data['saved_sessions']:
+            tabs_to_load = self.settings_data['saved_sessions'][session_name]
+            # 確認ダイアログ
+            reply = QMessageBox.question(self, "セッションの復元",
+                                         f"セッション '{session_name}' を復元します。現在のすべてのタブを閉じますか？",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel)
+
+            if reply == QMessageBox.StandardButton.Cancel:
+                return
+
+            if reply == QMessageBox.StandardButton.Yes:
+                # 現在のすべてのタブを閉じる
+                for i in reversed(range(self.tabs.count())):
+                    self.tabs.removeTab(i)
+
+            for tab_data in tabs_to_load:
+                self.add_new_tab(QUrl(tab_data['url']), tab_data['title'])
+            if not self.suppress_notifications:
+                self.statusBar().showMessage(f"セッション '{session_name}' を復元しました。", 3000)
+        else:
+            if not self.suppress_notifications:
+                QMessageBox.warning(self, "セッションの復元", f"セッション '{session_name}' が見つかりません。")
+
+    def delete_session(self, session_name):
+        """保存されたセッションを削除する。"""
+        reply = QMessageBox.question(self, "セッションの削除",
+                                     f"セッション '{session_name}' を本当に削除しますか？",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            if session_name in self.settings_data['saved_sessions']:
+                del self.settings_data['saved_sessions'][session_name]
+                self.save_settings()
+                self.update_session_menu()
+                if not self.suppress_notifications:
+                    self.statusBar().showMessage(f"セッション '{session_name}' を削除しました。", 3000)
+
+    def update_session_menu(self):
+        """セッション管理メニューを更新する。"""
+        # 既存の動的に追加されたアクションをクリア
+        actions_to_remove = [action for action in self.session_menu.actions() if action.text() not in ["現在のセッションを保存", "現在のセッションを新しいウィンドウで開く"]]
+        for action in actions_to_remove:
+            self.session_menu.removeAction(action)
+        
+        self.session_menu.addSeparator()
+
+        if self.settings_data['saved_sessions']:
+            for session_name in self.settings_data['saved_sessions'].keys():
+                session_sub_menu = self.session_menu.addMenu(session_name)
+                
+                load_action = QAction("復元", self)
+                load_action.triggered.connect(lambda checked, sn=session_name: self.load_session(sn))
+                session_sub_menu.addAction(load_action)
+                
+                delete_action = QAction("削除", self)
+                delete_action.triggered.connect(lambda checked, sn=session_name: self.delete_session(sn))
+                session_sub_menu.addAction(delete_action)
+        else:
+            no_session_action = QAction("保存されたセッションはありません", self)
+            no_session_action.setEnabled(False)
+            self.session_menu.addAction(no_session_action)
+            
+    # --- ワークスペース機能 ---
+    def update_workspace_menu(self):
+        """ワークスペースメニューを更新する。"""
+        self.workspace_menu.clear()
+        
+        if self.settings_data.get('workspaces'):
+            for ws_name in self.settings_data['workspaces'].keys():
+                action = QAction(ws_name, self)
+                action.triggered.connect(lambda checked, name=ws_name: self.activate_workspace(name))
+                self.workspace_menu.addAction(action)
+        else:
+            no_workspace_action = QAction("ワークスペースはありません", self)
+            no_workspace_action.setEnabled(False)
+            self.workspace_menu.addAction(no_workspace_action)
+
+    def activate_workspace(self, workspace_name):
+        """指定されたワークスペースをアクティブにする。"""
+        if workspace_name in self.settings_data.get('workspaces', {}):
+            urls_to_load = self.settings_data['workspaces'][workspace_name]['urls']
+            
+            # 現在のタブをすべて閉じる
+            for i in reversed(range(self.tabs.count())):
+                self.tabs.removeTab(i)
+            
+            # ワークスペースのURLを開く
+            for url in urls_to_load:
+                self.add_new_tab(QUrl(url), urlparse(url).hostname or "新規タブ")
+            
+            if not self.suppress_notifications:
+                self.statusBar().showMessage(f"ワークスペース '{workspace_name}' をアクティブにしました。", 5000)
+        else:
+            if not self.suppress_notifications:
+                QMessageBox.warning(self, "ワークスペース", f"ワークスペース '{workspace_name}' が見つかりません。")
+
+    # --- RSSリーダー機能 ---
+    def show_rss_reader(self):
+        """RSSリーダーダイアログを表示する。"""
+        rss_dialog = RSSReaderDialog(self, self.settings_data.get('rss_feeds', []))
+        rss_dialog.exec()
+        
+    def check_rss_feeds_for_new_articles(self):
+        """バックグラウンドでRSSフィードをチェックし、新着記事があれば通知する。"""
+        new_articles_count = 0
+        for feed_url in self.settings_data.get('rss_feeds', []):
+            try:
+                response = requests.get(feed_url, timeout=3)
+                response.raise_for_status()
+                root = ET.fromstring(response.content)
+
+                articles = []
+                for item in root.findall('.//item'):
+                    title = item.find('title').text if item.find('title') is not None else 'No Title'
+                    link = item.find('link').text if item.find('link') is not None else '#'
+                    articles.append({'title': title, 'link': link})
+                
+                if not articles: # RSSが見つからなければAtomを試す
+                    for entry in root.findall('{http://www.w3.org/2005/Atom}entry'):
+                        title = entry.find('{http://www.w3.org/2005/Atom}title').text if entry.find('{http://www.w3.org/2005/Atom}title') is not None else 'No Title'
+                        link_el = entry.find('{http://www.w3.org/2005/Atom}link')
+                        link = link_el.get('href') if link_el is not None else '#'
+                        articles.append({'title': title, 'link': link})
+
+                # ここで「新着記事」の判定ロジックを入れることができます。
+                # 例: 最後のチェック以降に追加された記事を数える、など。
+                # 今回は単純に記事数をカウント。
+                new_articles_count += len(articles)
+
+            except Exception as e:
+                print(f"RSSフィード {feed_url} の更新中にエラー: {e}", file=sys.stderr)
+                continue
+
+        if new_articles_count > 0:
+            if not self.suppress_notifications:
+                self.statusBar().showMessage(f"新しいRSS記事が {new_articles_count} 件あります！", 5000)
+
+
+def get_system_theme_mode():
+    """
+    システムのテーマ設定 (ダーク/ライト) を取得する (macOS, Windows, Linux)。
+    """
+    if platform.system() == "Darwin":
+        try:
+            import subprocess
+            result = subprocess.run(['defaults', 'read', '-g', 'AppleInterfaceStyle'], capture_output=True, text=True)
+            return 'dark' if result.returncode == 0 and 'Dark' in result.stdout else 'light'
+        except Exception:
+            return 'light'
+    elif platform.system() == "Windows":
+        try:
+            import winreg
+            reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize')
+            value, _ = winreg.QueryValueEx(reg_key, 'AppsUseLightTheme')
+            return 'light' if value == 1 else 'dark'
+        except Exception:
+            return 'light'
+    elif platform.system() == "Linux":
+        try:
+            settings_path = os.path.expanduser('~/.config/gtk-3.0/settings.ini')
+            if os.path.exists(settings_path):
+                with open(settings_path, 'r') as f:
+                    for line in f:
+                        if line.strip().startswith('gtk-application-prefer-dark-theme'):
+                            return 'dark' if 'true' in line.lower() else 'light'
+        except Exception:
+            pass
+        return 'light'
+    return 'light' # その他のOSまたは失敗
+
+# --- アプリケーションの実行 ---
+if __name__ == '__main__':
+    # QApplicationインスタンスは一度だけ作成する必要がある。
+    if not QApplication.instance():
+        app = QApplication(sys.argv)
+    else:
+        app = QApplication.instance()
+    
+    try:
+        app_icon = QIcon('browser_logo.png')
+        if not app_icon.isNull():
+            app.setWindowIcon(app_icon)
+            print("アプリケーションアイコンを設定しました。")
+        else:
+            print("指定されたアイコンファイルが見つからないか、読み込めませんでした。", file=sys.stderr)
+    except Exception as e:
+        print(f"アイコンの設定中にエラーが発生しました: {e}", file=sys.stderr)
+
+    # 起動時にシステムテーマを取得して適用。
+    initial_theme = get_system_theme_mode()
+    if initial_theme == 'dark':
+        # ダークモードのパレットを適用。
+        palette = QPalette()
+        palette.setColor(QPalette.ColorRole.Window, QColor(45, 45, 45))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(240, 240, 240))
+        palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(50, 50, 50))
+        palette.setColor(QPalette.ColorRole.Text, QColor(240, 240, 240))
+        palette.setColor(QPalette.ColorRole.Button, QColor(60, 60, 60))
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor(240, 240, 240))
+        # メニューの背景色と文字色を明示的に設定
+        # QPalette.ColorRole.Menu は存在しないため QSS で対応
+        app.setPalette(palette)
+        # アプリ起動時に QSS も適用
+        app.setStyleSheet("""
+            QMenu {
+                background-color: #282828;
+                color: #F0F0F0;
+                border: 1px solid #3A3A3A;
+            }
+            QMenu::item {
+                padding: 5px 15px 5px 25px;
+            }
+            QMenu::item:selected {
+                background-color: #0078D7;
+                color: #FFFFFF;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #505050;
+                margin: 5px 0px;
+            }
+        """)
+
+    window = FullFeaturedBrowser()
+    window.show()
+    sys.exit(app.exec())
