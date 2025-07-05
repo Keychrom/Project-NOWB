@@ -603,7 +603,7 @@ class FullFeaturedBrowser(QMainWindow):
         self.download_manager = DownloadManagerDialog(self)
         
         # ここにバージョン情報を定義
-        self.browser_version = "V1.0.0-Alpha1.B3"
+        self.browser_version = "V1.0.0-Alpha1.B4"
 
         # current_search_engine_url を、save_settings() が呼び出される前にデフォルト値で初期化します。
         self.current_search_engine_url = "https://www.google.com/search?q=" 
@@ -2072,6 +2072,36 @@ class FullFeaturedBrowser(QMainWindow):
             self.tabs.currentWidget().reload()
             self.statusBar().showMessage("レトロピクセルモードOFF。", 3000)
     
+    def apply_retro_pixel_filter(self, browser):
+        """Applies the retro pixel filter to a given browser instance's page when it finishes loading."""
+        if not browser:
+            return
+
+        js_code = """
+            document.querySelectorAll('img').forEach(img => {
+                var canvas = document.createElement('canvas');
+                var context = canvas.getContext('2d');
+                var width = img.naturalWidth;
+                var height = img.naturalHeight;
+                if (width === 0 || height === 0) return; // Skip unloaded images
+                canvas.width = width;
+                canvas.height = height;
+
+                context.webkitImageSmoothingEnabled = false;
+                context.mozImageSmoothingEnabled = false;
+                context.imageSmoothingEnabled = false;
+
+                // 低解像度で描画してから拡大
+                var pixelSize = 16;
+                context.drawImage(img, 0, 0, width / pixelSize, height / pixelSize);
+                context.drawImage(canvas, 0, 0, width / pixelSize, height / pixelSize, 0, 0, width, height);
+
+                img.src = canvas.toDataURL();
+            });
+        """
+        # Run the script after the page has finished loading.
+        browser.loadFinished.connect(lambda ok: browser.page().runJavaScript(js_code) if ok else None)
+    
     def activate_cleaning_robot(self):
         """画面にお掃除ロボットを表示する。"""
         current_browser = self.tabs.currentWidget()
@@ -2262,6 +2292,7 @@ if __name__ == '__main__':
         painter.end()
 
     splash = QSplashScreen(pixmap)
+    splash.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.WindowStaysOnTopHint)
     splash.showMessage("Project-NOWB を起動しています...",
                        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter,
                        Qt.GlobalColor.white)
