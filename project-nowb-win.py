@@ -741,6 +741,8 @@ class FullFeaturedBrowser(QMainWindow):
         # タブの右クリックメニューを有効化
         self.tabs.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tabs.customContextMenuRequested.connect(self.show_tab_context_menu)
+        # タブの移動を有効にする
+        self.tabs.tabBar().setMovable(True)
         self.splitter.addWidget(self.tabs)
 
         # --- ウェブパネルの設定 ---
@@ -1501,6 +1503,8 @@ class FullFeaturedBrowser(QMainWindow):
         page = browser.page()
         page.new_tab_requested.connect(self.handle_new_tab_request)
         page.fullScreenRequested.connect(lambda req, p=page: self.handle_fullscreen_request(req, p))
+        # リンクホバー時にステータスバーを更新
+        page.linkHovered.connect(self.handle_link_hovered)
         # ウェブページのカスタムCSSを適用
         page.runJavaScript(f"var style = document.createElement('style'); style.innerHTML = `{self.settings['custom_css']}`; document.head.appendChild(style);")
 
@@ -1611,6 +1615,20 @@ class FullFeaturedBrowser(QMainWindow):
         self.update_tab_groups_menu()
     def reset_sleep_timer(self): self.sleep_timer.start()
 
+    def handle_link_hovered(self, url):
+        """リンクにホバーした際にステータスバーにURLを表示する。"""
+        if url:
+            self.status_label.setText(url)
+        else:
+            # ホバーが外れたら、現在のページの情報を表示する
+            current_browser = self.tabs.currentWidget()
+            if isinstance(current_browser, QWebEngineView):
+                self.update_status_bar(current_browser)
+            elif isinstance(current_browser, UnloadedTabPlaceholder):
+                self.status_label.setText(f"非アクティブなタブ: {current_browser.title}")
+            else:
+                self.status_label.setText("準備完了。")
+
     def show_tab_context_menu(self, point):
         """タブの右クリックメニューを表示する。"""
         index = self.tabs.tabBar().tabAt(point)
@@ -1626,6 +1644,20 @@ class FullFeaturedBrowser(QMainWindow):
         duplicate_action = QAction("タブを複製", self)
         duplicate_action.triggered.connect(lambda: self.duplicate_tab(index))
         menu.addAction(duplicate_action)
+
+        menu.addSeparator()
+
+        # タブのミュート機能
+        mute_tab_action = QAction(self)
+        widget = self.tabs.widget(index)
+        if isinstance(widget, QWebEngineView):
+            is_muted = widget.page().isAudioMuted()
+            mute_tab_action.setText("タブのミュートを解除" if is_muted else "タブをミュート")
+            mute_tab_action.triggered.connect(lambda: self.toggle_tab_mute(index))
+        else:
+            mute_tab_action.setText("タブをミュート")
+            mute_tab_action.setEnabled(False)
+        menu.addAction(mute_tab_action)
 
         menu.addSeparator()
 
@@ -1671,6 +1703,18 @@ class FullFeaturedBrowser(QMainWindow):
         # 逆順でループしてインデックスのずれを防ぐ
         for i in range(self.tabs.count() - 1, index, -1):
             self.close_current_tab(i)
+
+    def toggle_tab_mute(self, index):
+        """指定されたインデックスのタブのミュート状態を切り替える。"""
+        widget = self.tabs.widget(index)
+        if isinstance(widget, QWebEngineView):
+            current_mute_state = widget.page().isAudioMuted()
+            widget.page().setAudioMuted(not current_mute_state)
+            # TODO: アイコンなどでミュート状態を視覚的に示す
+            if not current_mute_state:
+                self.statusBar().showMessage(f"タブ '{self.tabs.tabText(index)}' をミュートしました。", 2000)
+            else:
+                self.statusBar().showMessage(f"タブ '{self.tabs.tabText(index)}' のミュートを解除しました。", 2000)
 
     def activate_sleep_mode(self):
         current_browser = self.tabs.currentWidget()
