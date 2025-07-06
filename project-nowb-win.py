@@ -16,6 +16,12 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QToolBar, QLineEdit,
 from PyQt6.QtGui import QAction, QKeySequence, QColor, QPalette, QImage, QPainter, QPixmap, QIcon, QBrush
 
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+try:
+    import qtawesome as qta
+except ImportError:
+    print("警告: qtawesomeがインストールされていません。モダンアイコンは表示されません。", file=sys.stderr)
+    print("インストールするには、ターミナルで 'pip install qtawesome' を実行してください。", file=sys.stderr)
+    qta = None
 from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEngineDownloadRequest, QWebEngineProfile, QWebEnginePage
 from PyQt6.QtGui import QDesktopServices
 # テーマ変更を通知するためのグローバルシグナルクラス
@@ -351,49 +357,62 @@ class DownloadItemWidget(QWidget):
 
     def init_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(15)
+
+        # ファイルアイコン
+        file_icon_label = QLabel()
+        icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+        file_icon_label.setPixmap(icon.pixmap(32, 32))
+        layout.addWidget(file_icon_label)
 
         # ファイル情報エリア
         info_layout = QVBoxLayout()
-        self.file_name_label = QLabel(os.path.basename(self.download_request.downloadFileName()))
+        info_layout.setSpacing(2)
+        self.file_name_label = QLabel(f"<b>{os.path.basename(self.download_request.downloadFileName())}</b>")
         self.file_name_label.setWordWrap(True)
         self.status_label = QLabel("準備中...")
+        self.status_label.setStyleSheet("color: gray;")
         info_layout.addWidget(self.file_name_label)
         info_layout.addWidget(self.status_label)
         
         # プログレスバー
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
-        self.progress_bar.setFixedHeight(15)
+        self.progress_bar.setFixedHeight(8)
+        self.progress_bar.setTextVisible(False)
         info_layout.addWidget(self.progress_bar)
 
+        layout.addLayout(info_layout, 1)
+
         # ボタンエリア
-        button_widget = QWidget()
-        self.button_layout = QHBoxLayout(button_widget)
+        self.button_layout = QHBoxLayout()
         self.button_layout.setContentsMargins(0,0,0,0)
+        self.button_layout.setSpacing(5)
         self.pause_resume_button = QPushButton()
-        self.pause_resume_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+        if qta: self.pause_resume_button.setIcon(qta.icon('fa5s.pause', color='gray'))
         self.pause_resume_button.setToolTip("一時停止")
-        self.pause_resume_button.setFixedSize(24, 24)
+        self.pause_resume_button.setFixedSize(28, 28)
+        self.pause_resume_button.setFlat(True)
 
         self.cancel_button = QPushButton()
-        self.cancel_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton))
+        if qta: self.cancel_button.setIcon(qta.icon('fa5s.times', color='gray'))
         self.cancel_button.setToolTip("キャンセル")
-        self.cancel_button.setFixedSize(24, 24)
+        self.cancel_button.setFixedSize(28, 28)
+        self.cancel_button.setFlat(True)
 
         self.open_folder_button = QPushButton()
-        self.open_folder_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        if qta: self.open_folder_button.setIcon(qta.icon('fa5s.folder-open', color='gray'))
         self.open_folder_button.setToolTip("フォルダを開く")
-        self.open_folder_button.setFixedSize(24, 24)
+        self.open_folder_button.setFixedSize(28, 28)
         self.open_folder_button.setVisible(False)
+        self.open_folder_button.setFlat(True)
 
         self.button_layout.addWidget(self.pause_resume_button)
         self.button_layout.addWidget(self.cancel_button)
         self.button_layout.addWidget(self.open_folder_button)
-        self.button_layout.addStretch()
-
-        layout.addLayout(info_layout, 4)
-        layout.addWidget(button_widget, 1)
+        
+        layout.addLayout(self.button_layout)
 
     def setup_connections(self):
         # The 'downloadProgress' signal seems to be unavailable in some PyQt6 environments.
@@ -453,14 +472,14 @@ class DownloadItemWidget(QWidget):
 
     def update_state(self, state):
         if state == QWebEngineDownloadRequest.DownloadState.DownloadInProgress:
-            self.pause_resume_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+            if qta: self.pause_resume_button.setIcon(qta.icon('fa5s.pause', color='gray'))
             self.pause_resume_button.setToolTip("一時停止")
             self.is_paused = False
         # The integer value for DownloadPaused (4) is used directly to avoid an
         # AttributeError in some PyQt6/QtWebEngine environments where the Python
         # wrapper for this specific enum value seems to be missing.
         elif state == 4: # Corresponds to QWebEngineDownloadRequest.DownloadState.DownloadPaused
-            self.pause_resume_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+            if qta: self.pause_resume_button.setIcon(qta.icon('fa5s.play', color='gray'))
             self.pause_resume_button.setToolTip("再開")
             self.status_label.setText("一時停止中")
             self.is_paused = True
@@ -468,7 +487,7 @@ class DownloadItemWidget(QWidget):
             self.status_label.setText("ダウンロード完了")
             self.progress_bar.setValue(100)
             self.pause_resume_button.setVisible(False)
-            self.cancel_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
+            if qta: self.cancel_button.setIcon(qta.icon('fa5s.file-alt', color='gray'))
             self.cancel_button.setToolTip("ファイルを開く")
             try:
                 self.cancel_button.clicked.disconnect()
@@ -598,12 +617,13 @@ class FullFeaturedBrowser(QMainWindow):
         super().__init__()
         self.is_private_window = is_private
         self.settings_file = 'project_nowb_settings.json'
+        self.qss_parts = {} # QSSを部品ごとに管理
 
         # Download Managerのインスタンス化
         self.download_manager = DownloadManagerDialog(self)
         
         # ここにバージョン情報を定義
-        self.browser_version = "V1.0.0-Alpha1.B4"
+        self.browser_version = "V1.0.0-Alpha2.B1"
 
         # current_search_engine_url を、save_settings() が呼び出される前にデフォルト値で初期化します。
         self.current_search_engine_url = "https://www.google.com/search?q=" 
@@ -745,24 +765,28 @@ class FullFeaturedBrowser(QMainWindow):
         
         self.addToolBar(self.nav_toolbar)
 
-        back_btn = QAction("戻る", self)
+        back_btn = QAction(qta.icon('fa5s.arrow-left') if qta else self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack), "戻る", self)
         back_btn.triggered.connect(lambda: self.tabs.currentWidget().back())
         self.nav_toolbar.addAction(back_btn)
 
-        forward_btn = QAction("進む", self)
+        forward_btn = QAction(qta.icon('fa5s.arrow-right') if qta else self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowForward), "進む", self)
         forward_btn.triggered.connect(lambda: self.tabs.currentWidget().forward())
         self.nav_toolbar.addAction(forward_btn)
 
-        reload_btn = QAction("リロード", self)
+        reload_btn = QAction(qta.icon('fa5s.redo') if qta else self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload), "リロード", self)
         reload_btn.triggered.connect(lambda: self.tabs.currentWidget().reload())
         self.nav_toolbar.addAction(reload_btn)
 
-        home_btn = QAction("ホーム", self)
+        home_btn = QAction(qta.icon('fa5s.home') if qta else self.style().standardIcon(QStyle.StandardPixmap.SP_DirHomeIcon), "ホーム", self)
         home_btn.triggered.connect(self.navigate_home)
         self.nav_toolbar.addAction(home_btn)
 
         # --- 新規タブボタンの追加 (URLバーの左隣) ---
-        new_tab_button = QAction("＋", self)  # 「＋」をボタンのテキストとして使用
+        if qta:
+            # アイコンを表示する場合、テキストは空にする
+            new_tab_button = QAction(qta.icon('fa5s.plus'), "", self)
+        else:
+            new_tab_button = QAction("＋", self)
         new_tab_button.setToolTip("新しいタブを開く")
         new_tab_button.triggered.connect(lambda: self.add_new_tab(QUrl(self.settings['home_url'])))
         self.nav_toolbar.addAction(new_tab_button)
@@ -792,20 +816,16 @@ class FullFeaturedBrowser(QMainWindow):
         self.nav_toolbar.addSeparator()
         self.nav_toolbar.addWidget(QLabel("音量:"))
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self.volume_slider.setRange(0, 1) # 0でミュート、1でミュート解除
-        self.volume_slider.setValue(1)    # デフォルトはミュート解除
+        self.volume_slider.setRange(0, 100) # 0から100の範囲で音量調整
+        self.volume_slider.setValue(100)    # デフォルトは最大音量
         self.volume_slider.valueChanged.connect(self.set_volume)
         self.nav_toolbar.addWidget(self.volume_slider)
         
         # --- ハンバーガーメニューボタン ---
-        custom_icon_path = 'menu_icon.png' # 使用したいアイコンファイルのパス
-        if os.path.exists(custom_icon_path):
-            menu_icon = QIcon(custom_icon_path)
-            print(f"カスタムアイコン '{custom_icon_path}' を使用します。")
+        if qta:
+            menu_icon = qta.icon('fa5s.bars')
         else:
             menu_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarMenuButton)
-            print(f"警告: アイコンファイル '{custom_icon_path}' が見つかりませんでした。デフォルトのアイコンを使用します。")
-
         self.hamburger_menu_button = QAction(menu_icon, "メニュー", self)
         self.hamburger_menu_button.setToolTip("メニューを開く")
         self.hamburger_menu = QMenu(self)
@@ -1185,6 +1205,11 @@ class FullFeaturedBrowser(QMainWindow):
             if request:
                 request.accept()
 
+    def _apply_stylesheet(self):
+        """管理しているQSS部品を結合して適用する。"""
+        full_qss = "".join(self.qss_parts.values())
+        self.setStyleSheet(full_qss)
+
     def handle_fullscreen_request(self, request, originating_page):
         """ウェブページからのフルスクリーン要求を処理する。"""
         # 現在表示されているタブからの要求でなければ無視
@@ -1229,6 +1254,7 @@ class FullFeaturedBrowser(QMainWindow):
         グローバルシグナルから受け取ったテーマモードに基づいてパレットを更新する。
         """
         palette = QApplication.instance().palette()
+        theme_qss = ""
         if theme_mode == "dark":
             palette.setColor(QPalette.ColorRole.Window, QColor(45, 45, 45))
             palette.setColor(QPalette.ColorRole.WindowText, QColor(240, 240, 240))
@@ -1245,7 +1271,7 @@ class FullFeaturedBrowser(QMainWindow):
             palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(150, 150, 150)) # プレースホルダーテキスト
             
             # QSSを使ってメニューの背景色と文字色を設定
-            self.setStyleSheet("""
+            theme_qss = """
                 QMenu {
                     background-color: #282828; /* 暗いグレーの背景 */
                     color: #F0F0F0; /* 明るいグレーの文字色 */
@@ -1263,14 +1289,62 @@ class FullFeaturedBrowser(QMainWindow):
                     background: #505050;
                     margin: 5px 0px;
                 }
-            """)
+                QTabWidget::pane {
+                    border: 1px solid #3A3A3A;
+                    border-top: none;
+                }
+                QTabBar::tab {
+                    background-color: #3C3C3C;
+                    color: #F0F0F0;
+                    border: 1px solid #3A3A3A;
+                    border-bottom: none; /* タブの下線を消す */
+                    padding: 8px 16px;
+                    margin-right: 1px;
+                    border-top-left-radius: 8px;
+                    border-top-right-radius: 8px;
+                }
+                QTabBar::tab:selected {
+                    background-color: #2D2D2D; /* ウィンドウ背景と同じ色 */
+                    margin-bottom: -1px; /* 選択タブを少し下にずらしてpaneと繋がって見えるように */
+                    padding-bottom: 9px;
+                }
+                QTabBar::tab:!selected:hover {
+                    background-color: #4C4C4C;
+                }
+            """
 
         else: # "light"
             # デフォルトのパレットに戻す
             palette = QApplication.instance().style().standardPalette()
-            # ライトモードではQSSをリセット
-            self.setStyleSheet("") 
+            window_color = palette.color(QPalette.ColorRole.Window).name()
+            border_color = "#C4C4C3"
+            theme_qss = f"""
+                QTabWidget::pane {{
+                    border: 1px solid {border_color};
+                    border-top: none;
+                }}
+                QTabBar::tab {{
+                    background-color: #E1E1E1;
+                    color: #000000;
+                    border: 1px solid {border_color};
+                    border-bottom: none;
+                    padding: 8px 16px;
+                    margin-right: 1px;
+                    border-top-left-radius: 8px;
+                    border-top-right-radius: 8px;
+                }}
+                QTabBar::tab:selected {{
+                    background-color: {window_color};
+                    margin-bottom: -1px;
+                    padding-bottom: 9px;
+                }}
+                QTabBar::tab:!selected:hover {{
+                    background-color: #F0F0F0;
+                }}
+            """
         
+        self.qss_parts['theme'] = theme_qss
+        self._apply_stylesheet()
         QApplication.instance().setPalette(palette)
         self.setPalette(palette)
     
@@ -1279,19 +1353,21 @@ class FullFeaturedBrowser(QMainWindow):
         設定された背景画像をブラウザの背景に設定する。
         """
         image_path = self.settings.get('background_image', '')
-        if os.path.exists(image_path):
+        style = ""
+        if image_path and os.path.exists(image_path):
+            # QSSではパスの区切り文字にバックスラッシュではなくスラッシュを使用する
+            safe_image_path = image_path.replace('\\', '/')
             style = f"""
                 QMainWindow {{
-                    background-image: url({image_path});
+                    background-image: url({safe_image_path});
                     background-repeat: no-repeat;
                     background-position: center;
                     background-attachment: fixed;
                     background-size: cover;
                 }}
             """
-            self.setStyleSheet(style)
-        else:
-            self.setStyleSheet("") # 背景画像を削除
+        self.qss_parts['background'] = style
+        self._apply_stylesheet()
 
     def toggle_web_panel(self, visible):
         """ウェブパネルの表示/非表示を切り替える。"""
@@ -1349,6 +1425,7 @@ class FullFeaturedBrowser(QMainWindow):
         # 既存の処理も呼び出す
         self.update_url_bar_on_tab_change(index)
         self.reset_sleep_timer()
+        self.set_volume(self.volume_slider.value())
 
     def add_unloaded_tab(self, url_str, label):
         """ロードされていないタブのプレースホルダーを追加する。"""
@@ -1486,25 +1563,26 @@ class FullFeaturedBrowser(QMainWindow):
         
         widget_to_close = self.tabs.widget(index)
         if widget_to_close:
-            # シグナルを切断して、削除中に発行されるのを防ぎ、クラッシュを回避します。
-            # これにより、すでに削除されたウィジェットへのアクセスを防ぎます。
-            try:
-                widget_to_close.urlChanged.disconnect()
-                widget_to_close.titleChanged.disconnect()
-                widget_to_close.loadProgress.disconnect()
-                widget_to_close.loadFinished.disconnect()
-                page = widget_to_close.page()
-                # CustomWebEnginePageにのみ存在するシグナルは、インスタンスの型をチェックしてから切断します。
-                if isinstance(page, CustomWebEnginePage):
-                    page.new_tab_requested.disconnect()
-                page.fullScreenRequested.disconnect()
-            except TypeError:
-                # シグナルに接続がない場合にこの例外が発生しますが、
-                # 無視しても問題ありません。
-                pass
+            # 閉じるウィジェットがQWebEngineViewの場合のみ、関連するシグナルを切断し、
+            # JavaScriptを実行します。
+            if isinstance(widget_to_close, QWebEngineView):
+                # シグナルを切断して、削除中に発行されるのを防ぎ、クラッシュを回避します。
+                try:
+                    widget_to_close.urlChanged.disconnect()
+                    widget_to_close.titleChanged.disconnect()
+                    widget_to_close.loadProgress.disconnect()
+                    widget_to_close.loadFinished.disconnect()
+                    page = widget_to_close.page()
+                    if isinstance(page, CustomWebEnginePage):
+                        page.new_tab_requested.disconnect()
+                    page.fullScreenRequested.disconnect()
+                except TypeError:
+                    # シグナルに接続がない場合にこの例外が発生します。
+                    pass
 
-            # JavaScriptを実行してメディアの再生を停止し、リソースを解放
-            widget_to_close.page().runJavaScript("document.querySelectorAll('video, audio').forEach(media => { media.pause(); media.src = ''; });")
+                # JavaScriptを実行してメディアの再生を停止し、リソースを解放
+                widget_to_close.page().runJavaScript("document.querySelectorAll('video, audio').forEach(media => { media.pause(); media.src = ''; });")
+
             # ウィジェットを後で安全に削除するようにスケジュール
             widget_to_close.deleteLater()
 
@@ -1573,10 +1651,14 @@ class FullFeaturedBrowser(QMainWindow):
         else: self.progress_bar.setVisible(False)
     def set_volume(self, volume):
         current_browser = self.tabs.currentWidget()
-        if current_browser:
-            current_browser.page().setAudioMuted(volume == 0)
-            if volume > 0: self.statusBar().showMessage("音量: ミュート解除", 2000)
-            else: self.statusBar().showMessage("音量: ミュート", 2000)
+        if isinstance(current_browser, QWebEngineView):
+            # スライダーの値を0.0から1.0の範囲に変換
+            volume_float = float(volume) / 100.0
+            # JavaScriptを使ってページ内の全てのvideo/audio要素の音量を設定
+            # setAudioVolumeが利用できない環境のための代替策
+            js_code = f"document.querySelectorAll('video, audio').forEach(media => {{ media.volume = {volume_float}; }});"
+            current_browser.page().runJavaScript(js_code)
+            self.statusBar().showMessage(f"音量: {volume}%", 2000)
     def zoom_in(self): self.tabs.currentWidget().setZoomFactor(self.tabs.currentWidget().zoomFactor() + 0.1)
     def zoom_out(self): self.tabs.currentWidget().setZoomFactor(self.tabs.currentWidget().zoomFactor() - 0.1)
     def reset_zoom(self): self.tabs.currentWidget().setZoomFactor(1.0)
@@ -2323,6 +2405,28 @@ if __name__ == '__main__':
             QMenu::item {{ padding: 5px 15px 5px 25px; }}
             QMenu::item:selected {{ background-color: #0078D7; color: #FFFFFF; }}
             QMenu::separator {{ height: 1px; background: #505050; margin: 5px 0px; }}
+            QTabWidget::pane {{
+                border: 1px solid #3A3A3A;
+                border-top: none;
+            }}
+            QTabBar::tab {{
+                background-color: #3C3C3C;
+                color: #F0F0F0;
+                border: 1px solid #3A3A3A;
+                border-bottom: none;
+                padding: 8px 16px;
+                margin-right: 1px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: #2D2D2D;
+                margin-bottom: -1px;
+                padding-bottom: 9px;
+            }}
+            QTabBar::tab:!selected:hover {{
+                background-color: #4C4C4C;
+            }}
         """)
 
     # --- メインウィンドウの作成と表示 ---
