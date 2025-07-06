@@ -1769,8 +1769,9 @@ class FullFeaturedBrowser(QMainWindow):
                     # シグナルに接続がない場合にこの例外が発生します。
                     pass
 
-                # JavaScriptを実行してメディアの再生を停止し、リソースを解放
-                widget_to_close.page().runJavaScript("document.querySelectorAll('video, audio').forEach(media => { media.pause(); media.src = ''; });")
+                # ページをブランクにすることで、関連するプロセスやリソース(音声/動画再生など)を確実に解放します。
+                # これにより、タブを閉じた後も音声が再生され続ける問題を修正します。
+                widget_to_close.setUrl(QUrl("about:blank"))
 
             # ウィジェットを後で安全に削除するようにスケジュール
             widget_to_close.deleteLater()

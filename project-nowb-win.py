@@ -1769,8 +1769,9 @@ class FullFeaturedBrowser(QMainWindow):
                     # シグナルに接続がない場合にこの例外が発生します。
                     pass
 
-                # JavaScriptを実行してメディアの再生を停止し、リソースを解放
-                widget_to_close.page().runJavaScript("document.querySelectorAll('video, audio').forEach(media => { media.pause(); media.src = ''; });")
+                # ページをブランクにすることで、関連するプロセスやリソース(音声/動画再生など)を確実に解放します。
+                # これにより、タブを閉じた後も音声が再生され続ける問題を修正します。
+                widget_to_close.setUrl(QUrl("about:blank"))
 
             # ウィジェットを後で安全に削除するようにスケジュール
             widget_to_close.deleteLater()
@@ -2691,6 +2692,64 @@ class FullFeaturedBrowser(QMainWindow):
         QMessageBox.information(self, "ミッション開始！", f"あなたのミッションは…**'{random_mission}'**\n\nミッションの成功を祈ります！")
         self.statusBar().showMessage("新しいミッションが割り当てられました。", 5000)
 
+def handle_first_run():
+    """初回起動時の設定を行い、設定ファイルを生成する。"""
+    settings_file = 'project_nowb_settings.json'
+    
+    # デフォルト設定
+    settings_data = {
+        'first_run_completed': False,
+        'home_url': 'https://start.popmix-os.net',
+        'search_engines': {
+            "Google": "https://www.google.com/search?q=",
+            "Bing": "https://www.bing.com/search?q=",
+            "DuckDuckGo": "https://duckduckgo.com/?q=",
+        },
+        'current_search_engine_url': "https://www.google.com/search?q=",
+        'search_engine_name': 'Google',
+        'blocked_sites': ['twitter.com', 'facebook.com', 'tiktok.com'],
+        'favorite_sites': {
+            "Popmix-OS Start": "https://start.popmix-os.net",
+            "GitHub": "https://github.com",
+            "YouTube": "http://youtube.com",
+            "Wikipedia": "https://www.wikipedia.org"
+        },
+        'background_image': '',
+        'custom_css': '',
+        'window_size': [1024, 768],
+        'window_pos': [100, 100],
+        'web_panel_url': 'https://www.bing.com/chat',
+        'web_panel_visible': False,
+        'splitter_sizes': [800, 250],
+        'adblock_enabled': True,
+        'restore_last_session': True,
+        'last_session': []
+    }
+
+    initial_dialog_settings = {
+        'home_url': settings_data['home_url'],
+        'search_engine_name': settings_data['search_engine_name']
+    }
+
+    # 親ウィンドウなしでダイアログを表示
+    dialog = InitialSetupDialog(None, initial_dialog_settings)
+    if dialog.exec():
+        new_settings = dialog.get_settings()
+        settings_data.update(new_settings)
+        settings_data['first_run_completed'] = True
+        QMessageBox.information(None, "設定完了", "初回設定が完了しました。アプリケーションを終了しますので、再度起動してください。")
+    else:
+        settings_data['first_run_completed'] = True
+        QMessageBox.warning(None, "警告", "設定がキャンセルされたため、デフォルト設定で起動します。アプリケーションを終了しますので、再度起動してください。")
+
+    try:
+        with open(settings_file, 'w', encoding='utf-8') as f:
+            json.dump(settings_data, f, indent=4, ensure_ascii=False)
+        return True
+    except IOError as e:
+        QMessageBox.critical(None, "エラー", f"設定ファイルの保存に失敗しました: {e}")
+        return False
+
 def get_system_theme_mode():
     """
     システムのテーマ設定 (ダーク/ライト) を取得する (macOS, Windows, Linux)。
@@ -2727,6 +2786,15 @@ def get_system_theme_mode():
 if __name__ == '__main__':
     # QApplicationインスタンスは一度だけ作成する必要がある。
     app = QApplication(sys.argv)
+
+    # --- 初回起動チェック ---
+    settings_file = 'project_nowb_settings.json'
+    if not os.path.exists(settings_file):
+        # 初回起動の場合、設定ダイアログを表示し、設定後にアプリを終了して再起動を促す
+        if handle_first_run():
+            sys.exit(0) # 正常終了
+        else:
+            sys.exit(1) # 設定保存に失敗した場合はエラー終了
 
     # --- スプラッシュスクリーンの設定 ---
     pixmap = QPixmap('browser_logo.png')
