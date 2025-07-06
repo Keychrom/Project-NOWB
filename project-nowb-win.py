@@ -820,13 +820,22 @@ class FullFeaturedBrowser(QMainWindow):
 
         # --- 音量コントロール ---
         self.nav_toolbar.addSeparator()
-        self.nav_toolbar.addWidget(QLabel("音量:"))
+
+        # ミュートボタン
+        self.mute_button = QAction(self)
+        self.mute_button.setCheckable(True)
+        self.mute_button.triggered.connect(self.toggle_mute)
+        self.nav_toolbar.addAction(self.mute_button)
+
+        # 音量スライダー
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100) # 0から100の範囲で音量調整
         self.volume_slider.setValue(100)    # デフォルトは最大音量
-        self.volume_slider.valueChanged.connect(self.set_volume)
+        self.volume_slider.valueChanged.connect(self.slider_volume_changed)
         self.nav_toolbar.addWidget(self.volume_slider)
-        
+        self.last_volume = 100 # ミュート前の音量を保存
+        self._update_volume_ui(100) # 初期UI設定
+
         # --- ハンバーガーメニューボタン ---
         if qta:
             menu_icon = qta.icon('fa5s.bars')
@@ -1428,7 +1437,7 @@ class FullFeaturedBrowser(QMainWindow):
         # 既存の処理も呼び出す
         self.update_url_bar_on_tab_change(index)
         self.reset_sleep_timer()
-        self.set_volume(self.volume_slider.value())
+        self._apply_volume_to_page(self.volume_slider.value())
 
     def add_unloaded_tab(self, url_str, label):
         """ロードされていないタブのプレースホルダーを追加する。"""
@@ -1718,21 +1727,71 @@ class FullFeaturedBrowser(QMainWindow):
     def update_url_bar_on_tab_change(self, index):
         current_browser = self.tabs.currentWidget()
         if current_browser: self.url_bar.setText(current_browser.url().toString())
+
     def update_progress_bar(self, progress):
         if progress < 100:
             self.progress_bar.setValue(progress)
             self.progress_bar.setVisible(True)
         else: self.progress_bar.setVisible(False)
-    def set_volume(self, volume):
+
+    def slider_volume_changed(self, volume):
+        """音量スライダーの値が変更されたときに呼び出される。"""
+        if volume > 0:
+            self.last_volume = volume
+        self._update_volume_ui(volume)
+        self._apply_volume_to_page(volume)
+
+    def _update_volume_ui(self, volume):
+        """音量に応じてミュートボタンのUI（アイコン、状態、ツールチップ）を更新する。"""
+        is_muted = (volume == 0)
+        
+        # setCheckedがtriggeredシグナルを再発行しないようにブロック
+        self.mute_button.blockSignals(True)
+        self.mute_button.setChecked(is_muted)
+        self.mute_button.blockSignals(False)
+
+        if is_muted:
+            self.mute_button.setToolTip("ミュート解除")
+            if qta:
+                self.mute_button.setIcon(qta.icon('fa5s.volume-mute'))
+                self.mute_button.setText("")
+            else:
+                self.mute_button.setIcon(QIcon())
+                self.mute_button.setText("🔇")
+        else:
+            self.mute_button.setToolTip("ミュート")
+            if qta:
+                if volume > 66:
+                    self.mute_button.setIcon(qta.icon('fa5s.volume-up'))
+                elif volume > 33:
+                    self.mute_button.setIcon(qta.icon('fa5s.volume-down'))
+                else:
+                    self.mute_button.setIcon(qta.icon('fa5s.volume-off'))
+                self.mute_button.setText("")
+            else:
+                self.mute_button.setIcon(QIcon())
+                self.mute_button.setText("🔊")
+
+    def _apply_volume_to_page(self, volume):
+        """指定された音量を現在のウェブページに適用する。"""
         current_browser = self.tabs.currentWidget()
         if isinstance(current_browser, QWebEngineView):
-            # スライダーの値を0.0から1.0の範囲に変換
+            # ページ全体のミュート状態と、個々のメディア要素の音量を設定
+            current_browser.page().setAudioMuted(volume == 0)
             volume_float = float(volume) / 100.0
-            # JavaScriptを使ってページ内の全てのvideo/audio要素の音量を設定
-            # setAudioVolumeが利用できない環境のための代替策
             js_code = f"document.querySelectorAll('video, audio').forEach(media => {{ media.volume = {volume_float}; }});"
             current_browser.page().runJavaScript(js_code)
-            self.statusBar().showMessage(f"音量: {volume}%", 2000)
+        self.statusBar().showMessage(f"音量: {volume}%", 2000)
+
+    def toggle_mute(self, checked):
+        """ミュートボタンがクリックされたときの処理。"""
+        if checked: # ミュートにする
+            if self.volume_slider.value() != 0:
+                self.last_volume = self.volume_slider.value()
+            self.volume_slider.setValue(0)
+        else: # ミュートを解除する
+            self.volume_slider.setValue(self.last_volume)
+
     def zoom_in(self): self.tabs.currentWidget().setZoomFactor(self.tabs.currentWidget().zoomFactor() + 0.1)
     def zoom_out(self): self.tabs.currentWidget().setZoomFactor(self.tabs.currentWidget().zoomFactor() - 0.1)
     def reset_zoom(self): self.tabs.currentWidget().setZoomFactor(1.0)
