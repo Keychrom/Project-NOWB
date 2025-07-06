@@ -362,8 +362,11 @@ class DownloadItemWidget(QWidget):
 
         # ファイルアイコン
         file_icon_label = QLabel()
-        icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
-        file_icon_label.setPixmap(icon.pixmap(32, 32))
+        if qta:
+            icon = qta.icon('fa5s.file-download', color='gray')
+        else:
+            icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+        file_icon_label.setPixmap(icon.pixmap(QSize(32, 32)))
         layout.addWidget(file_icon_label)
 
         # ファイル情報エリア
@@ -928,51 +931,48 @@ class FullFeaturedBrowser(QMainWindow):
             mod_key = "Cmd"
             
         # ファイルメニュー
-        file_menu = self.hamburger_menu.addMenu("ファイル")
-        new_tab_action = QAction("新しいタブ", self)
+        file_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.file') if qta else "ファイル", "ファイル")
+        new_tab_action = QAction(qta.icon('fa5s.plus-square') if qta else "新しいタブ", "新しいタブ", self)
         new_tab_action.triggered.connect(lambda: self.add_new_tab())
         file_menu.addAction(new_tab_action)
         
-        private_window_action = QAction("プライベートウィンドウを開く", self)
+        private_window_action = QAction(qta.icon('fa5s.user-secret') if qta else "プライベートウィンドウを開く", "プライベートウィンドウを開く", self)
         private_window_action.triggered.connect(self.open_private_window)
         file_menu.addAction(private_window_action)
         
-        save_pdf_action = QAction("ページをPDFで保存", self)
+        save_pdf_action = QAction(qta.icon('fa5s.file-pdf') if qta else "ページをPDFで保存", "ページをPDFで保存", self)
         save_pdf_action.triggered.connect(self.save_page_as_pdf)
         file_menu.addAction(save_pdf_action)
         
-        screenshot_action = QAction("スクリーンショット", self)
+        screenshot_action = QAction(qta.icon('fa5s.camera') if qta else "スクリーンショット", "スクリーンショット", self)
         screenshot_action.setShortcut(QKeySequence(f"{mod_key}+Shift+S"))
         screenshot_action.triggered.connect(self.take_screenshot)
         file_menu.addAction(screenshot_action)
         
         file_menu.addSeparator()
         
-        exit_action = QAction("終了", self)
+        exit_action = QAction(qta.icon('fa5s.sign-out-alt') if qta else "終了", "終了", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
         # 表示メニュー
-        view_menu = self.hamburger_menu.addMenu("表示")
-        zoom_in_action = QAction("拡大", self)
+        view_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.eye') if qta else "表示", "表示")
+        zoom_in_action = QAction(qta.icon('fa5s.search-plus') if qta else "拡大", "拡大", self)
         zoom_in_action.setShortcut(QKeySequence(f"{mod_key}++"))
         zoom_in_action.triggered.connect(self.zoom_in)
         view_menu.addAction(zoom_in_action)
-        
-        zoom_out_action = QAction("縮小", self)
+        zoom_out_action = QAction(qta.icon('fa5s.search-minus') if qta else "縮小", "縮小", self)
         zoom_out_action.setShortcut(QKeySequence(f"{mod_key}+-"))
         zoom_out_action.triggered.connect(self.zoom_out)
         view_menu.addAction(zoom_out_action)
-
-        reset_zoom_action = QAction("ズームをリセット", self)
+        reset_zoom_action = QAction(qta.icon('fa5s.search') if qta else "ズームをリセット", "ズームをリセット", self)
         reset_zoom_action.setShortcut(QKeySequence(f"{mod_key}+0"))
         reset_zoom_action.triggered.connect(self.reset_zoom)
         view_menu.addAction(reset_zoom_action)
-        
         view_menu.addSeparator()
 
         # ウェブパネルの表示/非表示アクション
-        self.toggle_web_panel_action = QAction("ウェブパネルを表示", self)
+        self.toggle_web_panel_action = QAction(qta.icon('fa5s.columns') if qta else "ウェブパネルを表示", "ウェブパネルを表示", self)
         self.toggle_web_panel_action.setCheckable(True)
         # 初期状態を設定から反映
         if not self.is_private_window:
@@ -986,134 +986,134 @@ class FullFeaturedBrowser(QMainWindow):
         
         view_menu.addSeparator()
         
-        fullscreen_action = QAction("全画面表示", self)
+        fullscreen_action = QAction(qta.icon('fa5s.expand') if qta else "全画面表示", "全画面表示", self)
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
         
-        dev_tools_action = QAction("開発者ツール", self)
+        dev_tools_action = QAction(qta.icon('fa5s.code') if qta else "開発者ツール", "開発者ツール", self)
         dev_tools_action.triggered.connect(self.open_dev_tools)
         view_menu.addAction(dev_tools_action)
 
-        nostalgia_action = QAction("ノスタルジアフィルター", self)
+        nostalgia_action = QAction(qta.icon('fa5s.film') if qta else "ノスタルジアフィルター", "ノスタルジアフィルター", self)
         nostalgia_action.setCheckable(True)
         nostalgia_action.toggled.connect(self.toggle_nostalgia_filter)
         view_menu.addAction(nostalgia_action)
 
-        cyberpunk_action = QAction("サイバーパンクモード", self)
+        cyberpunk_action = QAction(qta.icon('fa5s.robot') if qta else "サイバーパンクモード", "サイバーパンクモード", self)
         cyberpunk_action.setCheckable(True)
         cyberpunk_action.toggled.connect(self.toggle_cyberpunk_mode)
         view_menu.addAction(cyberpunk_action)
 
-        retro_pixel_action = QAction("レトロピクセルモード", self)
+        retro_pixel_action = QAction(qta.icon('fa5s.gamepad') if qta else "レトロピクセルモード", "レトロピクセルモード", self)
         retro_pixel_action.setCheckable(True)
         retro_pixel_action.toggled.connect(self.toggle_retro_pixel_mode)
         view_menu.addAction(retro_pixel_action)
         
-        auto_scroll_menu = view_menu.addMenu("自動スクロール")
-        scroll_start_action = QAction("開始", self)
+        auto_scroll_menu = view_menu.addMenu(qta.icon('fa5s.arrows-alt-v') if qta else "自動スクロール", "自動スクロール")
+        scroll_start_action = QAction(qta.icon('fa5s.play-circle') if qta else "開始", "開始", self)
         scroll_start_action.triggered.connect(self.start_auto_scroll)
         auto_scroll_menu.addAction(scroll_start_action)
         
-        scroll_stop_action = QAction("停止", self)
+        scroll_stop_action = QAction(qta.icon('fa5s.stop-circle') if qta else "停止", "停止", self)
         scroll_stop_action.triggered.connect(self.stop_auto_scroll)
         auto_scroll_menu.addAction(scroll_stop_action)
         
-        set_speed_action = QAction("速度設定", self)
+        set_speed_action = QAction(qta.icon('fa5s.tachometer-alt') if qta else "速度設定", "速度設定", self)
         set_speed_action.triggered.connect(self.set_scroll_speed)
         auto_scroll_menu.addAction(set_speed_action)
 
         # ツールメニュー
-        tools_menu = self.hamburger_menu.addMenu("ツール")
-        download_action = QAction("ダウンロード", self)
+        tools_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.tools') if qta else "ツール", "ツール")
+        download_action = QAction(qta.icon('fa5s.download') if qta else "ダウンロード", "ダウンロード", self)
         download_action.triggered.connect(self.show_download_manager)
         tools_menu.addAction(download_action)
 
-        find_in_page_action = QAction("ページ内検索", self)
+        find_in_page_action = QAction(qta.icon('fa5s.search') if qta else "ページ内検索", "ページ内検索", self)
         find_in_page_action.setShortcut(QKeySequence(f"{mod_key}+F"))
         find_in_page_action.triggered.connect(self.find_in_page)
         tools_menu.addAction(find_in_page_action)
 
         # ウェブパネルのURL設定アクション
-        set_web_panel_url_action = QAction("ウェブパネルのURLを設定", self)
+        set_web_panel_url_action = QAction(qta.icon('fa5s.cog') if qta else "ウェブパネルのURLを設定", "ウェブパネルのURLを設定", self)
         set_web_panel_url_action.triggered.connect(self.set_web_panel_url)
         if self.is_private_window:
             set_web_panel_url_action.setEnabled(False)
         tools_menu.addAction(set_web_panel_url_action)
 
-        qr_code_action = QAction("QRコード生成", self)
+        qr_code_action = QAction(qta.icon('fa5s.qrcode') if qta else "QRコード生成", "QRコード生成", self)
         qr_code_action.triggered.connect(self.generate_qr_code)
         tools_menu.addAction(qr_code_action)
         
-        translate_action = QAction("ページを翻訳 (日本語へ)", self)
+        translate_action = QAction(qta.icon('fa5s.language') if qta else "ページを翻訳 (日本語へ)", "ページを翻訳 (日本語へ)", self)
         translate_action.triggered.connect(self.translate_page)
         tools_menu.addAction(translate_action)
 
-        tab_group_menu = tools_menu.addMenu("タブグループ")
-        create_group_action = QAction("新しいグループを作成", self)
+        tab_group_menu = tools_menu.addMenu(qta.icon('fa5s.object-group') if qta else "タブグループ", "タブグループ")
+        create_group_action = QAction(qta.icon('fa5s.plus-square') if qta else "新しいグループを作成", "新しいグループを作成", self)
         create_group_action.triggered.connect(self.create_tab_group)
         tab_group_menu.addAction(create_group_action)
         self.tab_group_menu = tab_group_menu
 
-        notes_action = QAction("シンプルメモ帳", self)
+        notes_action = QAction(qta.icon('fa5s.sticky-note') if qta else "シンプルメモ帳", "シンプルメモ帳", self)
         notes_action.triggered.connect(self.show_notes_dialog)
         tools_menu.addAction(notes_action)
 
-        ai_chat_action = QAction("AIアシスタントに質問", self)
+        ai_chat_action = QAction(qta.icon('fa5s.robot') if qta else "AIアシスタントに質問", "AIアシスタントに質問", self)
         ai_chat_action.triggered.connect(self.start_ai_chat)
         tools_menu.addAction(ai_chat_action)
         
-        summarize_action = QAction("AIによる要約", self)
+        summarize_action = QAction(qta.icon('fa5s.align-left') if qta else "AIによる要約", "AIによる要約", self)
         summarize_action.triggered.connect(self.summarize_page)
         tools_menu.addAction(summarize_action)
 
-        analyze_mood_action = QAction("ウェブサイトのムード分析", self)
+        analyze_mood_action = QAction(qta.icon('fa5s.palette') if qta else "ウェブサイトのムード分析", "ウェブサイトのムード分析", self)
         analyze_mood_action.triggered.connect(self.analyze_website_mood)
         tools_menu.addAction(analyze_mood_action)
         
-        analyze_sentiment_action = QAction("ページ内感情分析", self)
+        analyze_sentiment_action = QAction(qta.icon('fa5s.smile-beam') if qta else "ページ内感情分析", "ページ内感情分析", self)
         analyze_sentiment_action.triggered.connect(self.analyze_sentiment)
         tools_menu.addAction(analyze_sentiment_action)
         
         # お気に入り/ブックマーク
-        self.bookmarks_menu = self.hamburger_menu.addMenu("ブックマーク")
+        self.bookmarks_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.star') if qta else "ブックマーク", "ブックマーク")
         self.bookmarks = self.settings['favorite_sites']
         self.update_bookmarks_menu()
 
         # 履歴
-        self.history_menu = self.hamburger_menu.addMenu("履歴")
+        self.history_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.history') if qta else "履歴", "履歴")
         self.history = []
         self.update_history_menu()
 
         # お楽しみメニュー
-        fun_menu = self.hamburger_menu.addMenu("お楽しみ")
-        preaching_mode_action = QAction("集中ポーション (ON/OFF)", self)
+        fun_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.grin-stars') if qta else "お楽しみ", "お楽しみ")
+        preaching_mode_action = QAction(qta.icon('fa5s.user-clock') if qta else "集中ポーション (ON/OFF)", "集中ポーション (ON/OFF)", self)
         preaching_mode_action.setCheckable(True)
         preaching_mode_action.triggered.connect(self.toggle_preaching_mode)
         fun_menu.addAction(preaching_mode_action)
         
-        timemachine_action = QAction("タイムマシンモード", self)
+        timemachine_action = QAction(qta.icon('fa5s.archive') if qta else "タイムマシンモード", "タイムマシンモード", self)
         timemachine_action.triggered.connect(self.activate_timemachine)
         fun_menu.addAction(timemachine_action)
 
-        time_travel_action = QAction("タイムトラベルモード", self)
+        time_travel_action = QAction(qta.icon('fa5s.space-shuttle') if qta else "タイムトラベルモード", "タイムトラベルモード", self)
         time_travel_action.triggered.connect(self.toggle_time_travel_mode)
         fun_menu.addAction(time_travel_action)
 
-        clean_robot_action = QAction("お掃除ロボット起動", self)
+        clean_robot_action = QAction(qta.icon('fa5s.broom') if qta else "お掃除ロボット起動", "お掃除ロボット起動", self)
         clean_robot_action.triggered.connect(self.activate_cleaning_robot)
         fun_menu.addAction(clean_robot_action)
 
-        rain_sound_action = QAction("バーチャル雨音モード (ON/OFF)", self)
+        rain_sound_action = QAction(qta.icon('fa5s.cloud-rain') if qta else "バーチャル雨音モード (ON/OFF)", "バーチャル雨音モード (ON/OFF)", self)
         rain_sound_action.setCheckable(True)
         rain_sound_action.toggled.connect(self.toggle_rain_sound_mode)
         fun_menu.addAction(rain_sound_action)
         
-        mission_mode_action = QAction("ミッションモード", self)
+        mission_mode_action = QAction(qta.icon('fa5s.tasks') if qta else "ミッションモード", "ミッションモード", self)
         mission_mode_action.triggered.connect(self.start_mission_mode)
         fun_menu.addAction(mission_mode_action)
 
         # 設定メニュー
-        settings_action = QAction("設定を開く", self)
+        settings_action = QAction(qta.icon('fa5s.cog') if qta else "設定を開く", "設定を開く", self)
         settings_action.triggered.connect(self.show_settings_dialog)
         self.hamburger_menu.addSeparator()
         self.hamburger_menu.addAction(settings_action)
@@ -1883,7 +1883,7 @@ class FullFeaturedBrowser(QMainWindow):
             action.triggered.connect(lambda checked, u=url, n=name: self.add_new_tab(QUrl(u), n))
             self.bookmarks_menu.addAction(action)
         self.bookmarks_menu.addSeparator()
-        add_bookmark_action = QAction("現在のページをブックマーク", self)
+        add_bookmark_action = QAction(qta.icon('fa5s.plus-circle') if qta else "現在のページをブックマーク", "現在のページをブックマーク", self)
         add_bookmark_action.triggered.connect(self.add_current_page_as_bookmark)
         self.bookmarks_menu.addAction(add_bookmark_action)
     def add_current_page_as_bookmark(self):
@@ -1952,7 +1952,7 @@ class FullFeaturedBrowser(QMainWindow):
             action.triggered.connect(lambda checked, u=url, t=title: self.add_new_tab(QUrl(u), t))
             self.history_menu.addAction(action)
         self.history_menu.addSeparator()
-        clear_history_action = QAction("履歴をクリア", self)
+        clear_history_action = QAction(qta.icon('fa5s.trash-alt') if qta else "履歴をクリア", "履歴をクリア", self)
         clear_history_action.triggered.connect(self.clear_history)
         self.history_menu.addAction(clear_history_action)
     def clear_history(self):
