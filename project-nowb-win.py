@@ -715,10 +715,9 @@ class FullFeaturedBrowser(QMainWindow):
         self.history_file = 'project_nowb_history.json'
         self.adblock_interceptor = None
         self.qss_parts = {} # QSSを部品ごとに管理
-
-        # Download Managerのインスタンス化
-        self.download_manager = DownloadManagerDialog(self)
         
+        # Download Managerは必要になった時に初期化する（起動時間短縮のため）
+        self.download_manager = None
         # ここにバージョン情報を定義
         self.browser_version = "V1.0.0-Alpha2.B1"
 
@@ -1735,11 +1734,18 @@ class FullFeaturedBrowser(QMainWindow):
         status_text = f"ページ情報: {title} | {url}"
         self.status_label.setText(status_text)
 
+    def _get_download_manager(self):
+        """ダウンロードマネージャーのインスタンスを取得または作成する。起動速度向上のため遅延初期化。"""
+        if self.download_manager is None:
+            self.download_manager = DownloadManagerDialog(self)
+        return self.download_manager
+
     def show_download_manager(self):
         """ダウンロードマネージャーダイアログを表示する。"""
-        self.download_manager.show()
-        self.download_manager.raise_()
-        self.download_manager.activateWindow()
+        manager = self._get_download_manager()
+        manager.show()
+        manager.raise_()
+        manager.activateWindow()
 
     def remove_private_window_from_list(self, window):
         if window in self.private_windows:
@@ -2044,8 +2050,13 @@ class FullFeaturedBrowser(QMainWindow):
             current_browser.findText(text)
             self.statusBar().showMessage(f"ページ内で '{text}' を検索中...", 3000)
     def generate_qr_code(self):
-        import qrcode
-        from PIL.ImageQt import ImageQt
+        # 機能が呼び出された時に初めてモジュールをインポートする（起動時間短縮のため）
+        try:
+            import qrcode
+            from PIL.ImageQt import ImageQt
+        except ImportError:
+            QMessageBox.warning(self, "機能不足", "QRコードを生成するには 'qrcode' と 'Pillow' ライブラリが必要です。\n'pip install qrcode Pillow' を実行してください。")
+            return
 
         current_url = self.tabs.currentWidget().url().toString()
         if not current_url:
@@ -2203,7 +2214,8 @@ class FullFeaturedBrowser(QMainWindow):
             self.threadpool.start(fetcher)
 
     def handle_download(self, download_request):
-        self.download_manager.add_download(download_request)
+        manager = self._get_download_manager()
+        manager.add_download(download_request)
 
     def add_to_history(self, qurl):
         if self.is_private_window:
