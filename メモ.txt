@@ -1,0 +1,1 @@
+python -m nuitka --onefile --windows-disable-console --plugin-enable=pyqt6 --msvc=latest --include-data-file=browser_logo.png=browser_logo.png --output-dir=ProjectNOWB_Onefile_Build project-nowb-win.py
