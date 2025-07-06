@@ -735,59 +735,15 @@ class FullFeaturedBrowser(QMainWindow):
             # ハンドラ側で重複処理を防ぐ。
             QWebEngineProfile.defaultProfile().downloadRequested.connect(self.handle_download)
             self.private_windows = []
-            # 初回起動設定の処理
-            if not os.path.exists(self.settings_file):
-                # 初回起動時に使用するデフォルト設定を settings_data に直接セット
-                self.settings_data = {
-                    'first_run_completed': False, # まだ完了していない
-                    'home_url': 'https://start.popmix-os.net',
-                    'search_engines': {
-                        "Google": "https://www.google.com/search?q=",
-                        "Bing": "https://www.bing.com/search?q=",
-                        "DuckDuckGo": "https://duckduckgo.com/?q=",
-                    },
-                    'current_search_engine_url': self.current_search_engine_url, # 上記で初期化されたデフォルト値を使用
-                    'blocked_sites': ['twitter.com', 'facebook.com', 'tiktok.com'],
-                    'favorite_sites': {
-                        "Popmix-OS Start": "https://start.popmix-os.net",
-                        "GitHub": "https://github.com",
-                        "YouTube": "http://youtube.com",
-                        "Wikipedia": "https://www.wikipedia.org"
-                    },
-                    'background_image': '',
-                    'custom_css': '',
-                    'window_size': [1024, 768],
-                    'window_pos': [100, 100],
-                    'web_panel_url': 'https://www.bing.com/chat',
-                    'web_panel_visible': False,
-                    'splitter_sizes': [800, 250],
-                    'adblock_enabled': True,
-                }
-                # セッション管理用の設定も追加
-                self.settings_data.update({
-                    'restore_last_session': True,
-                    'last_session': []
-                })
+            
+            # 設定ファイルをロード
+            self.settings_data = self.load_settings()
+            if not self.settings_data:
+                QMessageBox.critical(None, "致命的なエラー", f"設定ファイル '{self.settings_file}' が見つからないか、破損しています。")
+                sys.exit(1)
 
-                # save_settings() を呼び出す前に self.settings を self.settings_data に設定
-                # これにより save_settings() が self.settings にアクセスできるようになります。
-                self.settings = self.settings_data.copy() # settings_data の内容を settings にコピー
-
-                # 初回セットアップダイアログを実行
-                self.run_initial_setup() 
-                
-                # run_initial_setup() 内で設定が更新されるため、再度 settings_data をロードし直します。
-                self.settings_data = self.load_settings()
-                # ロードされたデータから self.settings と current_search_engine_url を更新します。
-                self.settings = self.settings_data.copy()
-                self.current_search_engine_url = self.settings_data.get('current_search_engine_url', self.settings['search_engines']["Google"])
-
-            else:
-                # ファイルが存在する場合は既存の設定をロード
-                self.settings_data = self.load_settings()
-                self.settings = self.settings_data.copy() # self.settings が確実に設定されるようにします
-                # ロードされた設定から current_search_engine_url を更新します
-                self.current_search_engine_url = self.settings_data.get('current_search_engine_url', self.settings['search_engines']["Google"])
+            self.settings = self.settings_data.copy()
+            self.current_search_engine_url = self.settings_data.get('current_search_engine_url', self.settings.get('search_engines', {}).get("Google", "https://www.google.com/search?q="))
         
         self.is_preaching_mode_active = False
         self.blocked_timer = QTimer()
@@ -984,45 +940,6 @@ class FullFeaturedBrowser(QMainWindow):
         self.update_palette_from_system_theme()
         theme_signal.theme_changed.connect(self.update_palette)
         self.update_background_image()
-        
-    def run_initial_setup(self):
-        """
-        初回起動時に初期設定ダイアログを表示し、設定を保存する。
-        """
-        # 初回起動時に渡す初期設定は、現在の settings_data の値を使用
-        initial_settings = {
-            'home_url': self.settings_data.get('home_url', 'https://start.popmix-os.net'),
-            'search_engine_name': next((name for name, url in self.settings_data.get('search_engines', {}).items() if url == self.settings_data.get('current_search_engine_url')), "Google")
-        }
-        
-        dialog = InitialSetupDialog(self, initial_settings)
-        if dialog.exec():
-            # OKが押された場合
-            new_initial_settings = dialog.get_settings()
-            
-            # 設定データに反映 (settings_data を直接更新)
-            self.settings_data['first_run_completed'] = True
-            self.settings_data['home_url'] = new_initial_settings['home_url']
-            self.settings_data['current_search_engine_url'] = new_initial_settings['search_engine_url']
-            self.settings_data['search_engine_name'] = new_initial_settings['search_engine_name'] # 設定名を保存
-
-            # self.settings も settings_data の最新情報で更新
-            self.settings = self.settings_data.copy()
-            # self.current_search_engine_url も更新
-            self.current_search_engine_url = self.settings_data['current_search_engine_url']
-
-            self.save_settings() # 新しい設定を保存
-            QMessageBox.information(self, "設定完了", "初回設定が完了しました！ブラウザを開始します。")
-        else:
-            # キャンセルされた場合、デフォルト設定で続行
-            QMessageBox.warning(self, "警告", "設定が行われなかったため、デフォルト設定で開始します。")
-            self.settings_data['first_run_completed'] = True # デフォルト設定でも初回起動完了とする
-
-            # self.settings と self.current_search_engine_url も更新
-            self.settings = self.settings_data.copy()
-            self.current_search_engine_url = self.settings_data['current_search_engine_url']
-            
-            self.save_settings() # デフォルト設定を保存
 
     def setup_adblocker(self):
         """設定に基づいて広告ブロッカーをセットアップする。"""
@@ -2704,6 +2621,64 @@ class FullFeaturedBrowser(QMainWindow):
         QMessageBox.information(self, "ミッション開始！", f"あなたのミッションは…**'{random_mission}'**\n\nミッションの成功を祈ります！")
         self.statusBar().showMessage("新しいミッションが割り当てられました。", 5000)
 
+def handle_first_run():
+    """初回起動時の設定を行い、設定ファイルを生成する。"""
+    settings_file = 'project_nowb_settings.json'
+    
+    # デフォルト設定
+    settings_data = {
+        'first_run_completed': False,
+        'home_url': 'https://start.popmix-os.net',
+        'search_engines': {
+            "Google": "https://www.google.com/search?q=",
+            "Bing": "https://www.bing.com/search?q=",
+            "DuckDuckGo": "https://duckduckgo.com/?q=",
+        },
+        'current_search_engine_url': "https://www.google.com/search?q=",
+        'search_engine_name': 'Google',
+        'blocked_sites': ['twitter.com', 'facebook.com', 'tiktok.com'],
+        'favorite_sites': {
+            "Popmix-OS Start": "https://start.popmix-os.net",
+            "GitHub": "https://github.com",
+            "YouTube": "http://youtube.com",
+            "Wikipedia": "https://www.wikipedia.org"
+        },
+        'background_image': '',
+        'custom_css': '',
+        'window_size': [1024, 768],
+        'window_pos': [100, 100],
+        'web_panel_url': 'https://www.bing.com/chat',
+        'web_panel_visible': False,
+        'splitter_sizes': [800, 250],
+        'adblock_enabled': True,
+        'restore_last_session': True,
+        'last_session': []
+    }
+
+    initial_dialog_settings = {
+        'home_url': settings_data['home_url'],
+        'search_engine_name': settings_data['search_engine_name']
+    }
+
+    # 親ウィンドウなしでダイアログを表示
+    dialog = InitialSetupDialog(None, initial_dialog_settings)
+    if dialog.exec():
+        new_settings = dialog.get_settings()
+        settings_data.update(new_settings)
+        settings_data['first_run_completed'] = True
+        QMessageBox.information(None, "設定完了", "初回設定が完了しました。アプリケーションを終了しますので、再度起動してください。")
+    else:
+        settings_data['first_run_completed'] = True
+        QMessageBox.warning(None, "警告", "設定がキャンセルされたため、デフォルト設定で起動します。アプリケーションを終了しますので、再度起動してください。")
+
+    try:
+        with open(settings_file, 'w', encoding='utf-8') as f:
+            json.dump(settings_data, f, indent=4, ensure_ascii=False)
+        return True
+    except IOError as e:
+        QMessageBox.critical(None, "エラー", f"設定ファイルの保存に失敗しました: {e}")
+        return False
+
 def get_system_theme_mode():
     """
     システムのテーマ設定 (ダーク/ライト) を取得する (macOS, Windows, Linux)。
@@ -2740,6 +2715,15 @@ def get_system_theme_mode():
 if __name__ == '__main__':
     # QApplicationインスタンスは一度だけ作成する必要がある。
     app = QApplication(sys.argv)
+
+    # --- 初回起動チェック ---
+    settings_file = 'project_nowb_settings.json'
+    if not os.path.exists(settings_file):
+        # 初回起動の場合、設定ダイアログを表示し、設定後にアプリを終了して再起動を促す
+        if handle_first_run():
+            sys.exit(0) # 正常終了
+        else:
+            sys.exit(1) # 設定保存に失敗した場合はエラー終了
 
     # --- スプラッシュスクリーンの設定 ---
     pixmap = QPixmap('browser_logo.png')
