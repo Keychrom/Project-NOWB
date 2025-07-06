@@ -84,7 +84,7 @@ class CustomWebEnginePage(QWebEnginePage):
         ウェブページからの機能利用許可リクエストを処理する。
         特にフルスクリーンリクエストを許可する。
         """
-        if feature == QWebEnginePage.Feature.FullScreen:
+        if feature == QWebEnginePage.Feature.FullScreenRequested:
             self.setFeaturePermission(url, feature, QWebEnginePage.PermissionPolicy.PermissionGrantedByUser)
 
 class WorkerSignals(QObject):
