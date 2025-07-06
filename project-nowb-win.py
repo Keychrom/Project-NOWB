@@ -22,7 +22,8 @@ except ImportError:
     print("警告: qtawesomeがインストールされていません。モダンアイコンは表示されません。", file=sys.stderr)
     print("インストールするには、ターミナルで 'pip install qtawesome' を実行してください。", file=sys.stderr)
     qta = None
-from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEngineDownloadRequest, QWebEngineProfile, QWebEnginePage
+from PyQt6.QtWebEngineCore import (QWebEngineSettings, QWebEngineDownloadRequest, QWebEngineProfile, QWebEnginePage,
+                                  QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo)
 from PyQt6.QtGui import QDesktopServices
 # テーマ変更を通知するためのグローバルシグナルクラス
 class ThemeSignal(QObject):
@@ -89,6 +90,41 @@ class FaviconFetcher(QRunnable):
         except Exception:
             pass # ファビコン取得失敗は無視
         self.signals.favicon_ready.emit(self.url, icon)
+
+class AdblockInterceptor(QWebEngineUrlRequestInterceptor):
+    """
+    URLリクエストをインターセプトして広告をブロックするクラス。
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.rules = self._load_rules()
+
+    def _load_rules(self, file_path="adblock_list.txt"):
+        """ブロックリストをファイルから読み込む。"""
+        if not os.path.exists(file_path):
+            print(f"警告: 広告ブロックリスト '{file_path}' が見つかりません。基本的なルールを使用します。", file=sys.stderr)
+            # デフォルトの基本的なルール
+            return [
+                "doubleclick.net", "adservice.google.", "googlesyndication.com",
+                "googletagservices.com", "google-analytics.com", "scorecardresearch.com",
+                "/ad-", "/ads/", "/advert", "ad.doubleclick.net"
+            ]
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                # コメント行(#で始まる)と空行を無視する
+                return [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        except Exception as e:
+            print(f"エラー: 広告ブロックリストの読み込みに失敗しました: {e}", file=sys.stderr)
+            return []
+
+    def interceptRequest(self, info: QWebEngineUrlRequestInfo):
+        """リクエストをインターセプトし、ルールに一致すればブロックする。"""
+        url = info.requestUrl().toString()
+        for rule in self.rules:
+            if rule in url:
+                print(f"[AdBlock] ブロックしました: {url} (ルール: {rule})")
+                info.block(True)
+                return
 
 class InitialSetupDialog(QDialog):
     """
@@ -257,6 +293,12 @@ class SettingsDialog(QDialog):
         self.restore_session_checkbox.setToolTip("このオプションを有効にすると、次回起動時に最後に開いていたタブが復元されます。")
         ui_layout.addWidget(self.restore_session_checkbox, 3, 0, 1, 3)
 
+        # 広告ブロッカー設定
+        self.adblock_checkbox = QCheckBox("広告ブロッカーを有効にする")
+        self.adblock_checkbox.setChecked(self.settings_data.get('adblock_enabled', True))
+        self.adblock_checkbox.setToolTip("一般的な広告やトラッカーをブロックします。一部のサイトの表示が崩れる可能性があります。")
+        ui_layout.addWidget(self.adblock_checkbox, 4, 0, 1, 3)
+
         ui_group.setLayout(ui_layout)
         main_layout.addWidget(ui_group, 2, 0, 1, 2)
 
@@ -269,12 +311,12 @@ class SettingsDialog(QDialog):
         button_box.addStretch(1)
         button_box.addWidget(ok_button)
         button_box.addWidget(cancel_button)
-        main_layout.addLayout(button_box, 3, 0, 1, 2) # バージョンラベルの1つ上の行に配置
+        main_layout.addLayout(button_box, 4, 0, 1, 2) # バージョンラベルの1つ上の行に配置
 
         # --- バージョン情報表示 (最下部に配置) ---
         version_label = QLabel(f"バージョン: **Project-NOWB {self.browser_version}**")
         version_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom) # 右下寄せ
-        main_layout.addWidget(version_label, 4, 0, 1, 2) # 最下行、2列にまたがって配置
+        main_layout.addWidget(version_label, 5, 0, 1, 2) # 最下行、2列にまたがって配置
 
 
     def add_blocked_site(self):
@@ -338,6 +380,7 @@ class SettingsDialog(QDialog):
             'background_image': self.bg_image_path_input.text(),
             'custom_css': self.custom_css_input.toPlainText(),
             'restore_last_session': self.restore_session_checkbox.isChecked(),
+            'adblock_enabled': self.adblock_checkbox.isChecked(),
         }
 
 class DownloadItemWidget(QWidget):
@@ -620,6 +663,7 @@ class FullFeaturedBrowser(QMainWindow):
         super().__init__()
         self.is_private_window = is_private
         self.settings_file = 'project_nowb_settings.json'
+        self.adblock_interceptor = None
         self.qss_parts = {} # QSSを部品ごとに管理
 
         # Download Managerのインスタンス化
@@ -667,7 +711,8 @@ class FullFeaturedBrowser(QMainWindow):
                     'window_pos': [100, 100],
                     'web_panel_url': 'https://www.bing.com/chat',
                     'web_panel_visible': False,
-                    'splitter_sizes': [800, 250]
+                    'splitter_sizes': [800, 250],
+                    'adblock_enabled': True,
                 }
                 # セッション管理用の設定も追加
                 self.settings_data.update({
@@ -889,6 +934,8 @@ class FullFeaturedBrowser(QMainWindow):
             self.bookmarks_menu.setEnabled(False)
 
         # --- UIの初期化 ---
+        if not self.is_private_window:
+            self.setup_adblocker()
         self.update_palette_from_system_theme()
         theme_signal.theme_changed.connect(self.update_palette)
         self.update_background_image()
@@ -932,6 +979,39 @@ class FullFeaturedBrowser(QMainWindow):
             
             self.save_settings() # デフォルト設定を保存
 
+    def setup_adblocker(self):
+        """設定に基づいて広告ブロッカーをセットアップする。"""
+        # このメソッドはメインウィンドウインスタンスでのみ意味を持つ
+        if self.is_private_window:
+            return
+
+        adblock_enabled = self.settings.get('adblock_enabled', True)
+
+        if adblock_enabled:
+            if not self.adblock_interceptor:
+                self.adblock_interceptor = AdblockInterceptor(self)
+            
+            interceptor_to_set = self.adblock_interceptor
+            status_message = "広告ブロッカー: ON"
+            print("広告ブロッカーが有効になりました。")
+        else:
+            interceptor_to_set = None
+            self.adblock_interceptor = None # 参照をクリア
+            status_message = "広告ブロッカー: OFF"
+            print("広告ブロッカーが無効になりました。")
+
+        # 通常プロファイルに設定
+        QWebEngineProfile.defaultProfile().setUrlRequestInterceptor(interceptor_to_set)
+        # 管理しているすべてのプライベートウィンドウのプロファイルにも設定
+        for p_win in self.private_windows:
+            p_win.private_profile.setUrlRequestInterceptor(interceptor_to_set)
+        
+        self.statusBar().showMessage(status_message, 2000)
+
+    def open_private_window(self):
+        """新しいプライベートブラウジングウィンドウを開く。"""
+        if self.is_private_window:
+            return # プライベートウィンドウからさらにプライベートウィンドウは開かない
 
     def setup_hamburger_menu(self):
         """
@@ -1559,14 +1639,12 @@ class FullFeaturedBrowser(QMainWindow):
         self.download_manager.raise_()
         self.download_manager.activateWindow()
 
-    def open_private_window(self):
-        """新しいプライベートブラウジングウィンドウを開く。"""
-        if self.is_private_window:
-            return # プライベートウィンドウからさらにプライベートウィンドウは開かない
-
         private_window = FullFeaturedBrowser(is_private=True, parent_settings=self.settings)
         self.private_windows.append(private_window)
         private_window.window_closed.connect(self.remove_private_window_from_list)
+        # 広告ブロッカーが有効なら、新しいプライベートウィンドウにも適用
+        if self.adblock_interceptor:
+            private_window.private_profile.setUrlRequestInterceptor(self.adblock_interceptor)
         private_window.show()
 
     def remove_private_window_from_list(self, window):
@@ -1973,6 +2051,9 @@ class FullFeaturedBrowser(QMainWindow):
             
             # 背景画像を更新
             self.update_background_image()
+            
+            # 広告ブロッカーの設定を更新
+            self.setup_adblocker()
             
             self.save_settings() # 変更をファイルに保存
             self.statusBar().showMessage("設定が保存されました！", 3000)

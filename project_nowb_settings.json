@@ -36,8 +36,8 @@
     ],
     "restore_last_session": true,
     "last_session": [
-        "https://www.youtube.com/watch?v=JQKoGdBybyc",
-        ""
+        "https://www.youtube.com/"
     ],
-    "search_engine_name": "Google"
+    "search_engine_name": "Google",
+    "adblock_enabled": true
 }
