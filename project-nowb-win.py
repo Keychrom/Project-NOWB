@@ -735,6 +735,9 @@ class FullFeaturedBrowser(QMainWindow):
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self.close_current_tab)
         self.tabs.currentChanged.connect(self.handle_tab_changed) # 起動高速化のため、タブの遅延読み込みを処理するハンドラに接続
+        # タブの右クリックメニューを有効化
+        self.tabs.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tabs.customContextMenuRequested.connect(self.show_tab_context_menu)
         self.splitter.addWidget(self.tabs)
 
         # --- ウェブパネルの設定 ---
@@ -1586,9 +1589,80 @@ class FullFeaturedBrowser(QMainWindow):
             # ウィジェットを後で安全に削除するようにスケジュール
             widget_to_close.deleteLater()
 
+        # 最後のタブは閉じないようにする
+        if self.tabs.count() <= 1:
+            # 最後のタブを閉じようとした場合は、新しいタブを開いてから閉じる
+            if index == 0:
+                self.add_new_tab(QUrl(self.settings['home_url']))
+            else:
+                # このケースは通常発生しないはずだが、念のため
+                return
+
         self.tabs.removeTab(index)
         self.update_tab_groups_menu()
     def reset_sleep_timer(self): self.sleep_timer.start()
+
+    def show_tab_context_menu(self, point):
+        """タブの右クリックメニューを表示する。"""
+        index = self.tabs.tabBar().tabAt(point)
+        if index == -1:
+            return
+
+        menu = QMenu(self)
+
+        reload_action = QAction("再読み込み", self)
+        reload_action.triggered.connect(lambda: self.reload_tab(index))
+        menu.addAction(reload_action)
+
+        duplicate_action = QAction("タブを複製", self)
+        duplicate_action.triggered.connect(lambda: self.duplicate_tab(index))
+        menu.addAction(duplicate_action)
+
+        menu.addSeparator()
+
+        close_action = QAction("タブを閉じる", self)
+        close_action.triggered.connect(lambda: self.close_current_tab(index))
+        menu.addAction(close_action)
+
+        close_others_action = QAction("他のタブをすべて閉じる", self)
+        close_others_action.triggered.connect(lambda: self.close_other_tabs(index))
+        menu.addAction(close_others_action)
+
+        close_right_action = QAction("右側のタブを閉じる", self)
+        close_right_action.triggered.connect(lambda: self.close_tabs_to_the_right(index))
+        if index == self.tabs.count() - 1:
+            close_right_action.setEnabled(False)
+        menu.addAction(close_right_action)
+
+        menu.exec(self.tabs.tabBar().mapToGlobal(point))
+
+    def reload_tab(self, index):
+        """指定されたインデックスのタブをリロードする。"""
+        widget = self.tabs.widget(index)
+        if isinstance(widget, QWebEngineView):
+            widget.reload()
+
+    def duplicate_tab(self, index):
+        """指定されたインデックスのタブを複製する。"""
+        widget = self.tabs.widget(index)
+        if isinstance(widget, QWebEngineView):
+            self.add_new_tab(widget.url(), widget.title())
+        elif isinstance(widget, UnloadedTabPlaceholder):
+            self.add_unloaded_tab(widget.url.toString(), widget.title)
+
+    def close_other_tabs(self, index_to_keep):
+        """指定されたインデックス以外のすべてのタブを閉じる。"""
+        # 逆順でループしてインデックスのずれを防ぐ
+        for i in range(self.tabs.count() - 1, -1, -1):
+            if i != index_to_keep:
+                self.close_current_tab(i)
+
+    def close_tabs_to_the_right(self, index):
+        """指定されたインデックスより右側にあるすべてのタブを閉じる。"""
+        # 逆順でループしてインデックスのずれを防ぐ
+        for i in range(self.tabs.count() - 1, index, -1):
+            self.close_current_tab(i)
+
     def activate_sleep_mode(self):
         current_browser = self.tabs.currentWidget()
         if current_browser:
