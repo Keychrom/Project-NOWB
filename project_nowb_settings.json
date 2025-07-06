@@ -25,8 +25,8 @@
         480
     ],
     "window_pos": [
-        368,
-        74
+        814,
+        94
     ],
     "web_panel_url": "https://www.bing.com/chat",
     "web_panel_visible": false,
@@ -36,7 +36,9 @@
     ],
     "restore_last_session": true,
     "last_session": [
-        "https://www.youtube.com/"
+        "https://start.popmix-os.net/",
+        "https://www.startpage.com/",
+        "https://ja.wikipedia.org/wiki/メインページ"
     ],
     "search_engine_name": "Google",
     "adblock_enabled": true

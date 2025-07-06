@@ -1,0 +1,11 @@
+# Project-NOWB AdBlock Rules
+doubleclick.net
+adservice.google.
+googlesyndication.com
+googletagservices.com
+google-analytics.com
+scorecardresearch.com
+/ad-
+/ads/
+/advert
+ad.doubleclick.net

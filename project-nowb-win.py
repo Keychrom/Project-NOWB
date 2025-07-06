@@ -4,6 +4,7 @@ import time
 import platform
 import os
 import json
+import datetime
 import re
 from urllib.parse import urlparse
 from PyQt6.QtCore import QUrl, QFileInfo, Qt, QTimer, QSize, pyqtSignal, QObject, QCoreApplication, QStandardPaths, QRunnable, QThreadPool
@@ -25,6 +26,37 @@ except ImportError:
 from PyQt6.QtWebEngineCore import (QWebEngineSettings, QWebEngineDownloadRequest, QWebEngineProfile, QWebEnginePage,
                                   QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo)
 from PyQt6.QtGui import QDesktopServices
+
+# --- 定数定義 ---
+ADBLOCK_RULES_FILE = "adblock_list.txt"
+DEFAULT_ADBLOCK_RULES = [
+    "doubleclick.net", "adservice.google.", "googlesyndication.com",
+    "googletagservices.com", "google-analytics.com", "scorecardresearch.com",
+    "/ad-", "/ads/", "/advert", "ad.doubleclick.net"
+]
+
+def load_adblock_rules():
+    """広告ブロックリストをファイルから読み込む共通関数。"""
+    if not os.path.exists(ADBLOCK_RULES_FILE):
+        print(f"警告: 広告ブロックリスト '{ADBLOCK_RULES_FILE}' が見つかりません。デフォルトルールを使用します。", file=sys.stderr)
+        return DEFAULT_ADBLOCK_RULES
+    try:
+        with open(ADBLOCK_RULES_FILE, 'r', encoding='utf-8') as f:
+            return [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    except Exception as e:
+        print(f"エラー: 広告ブロックリストの読み込みに失敗しました: {e}", file=sys.stderr)
+        return []
+
+def save_adblock_rules(rules):
+    """広告ブロックリストをファイルに保存する共通関数。"""
+    try:
+        with open(ADBLOCK_RULES_FILE, 'w', encoding='utf-8') as f:
+            f.write("# Project-NOWB AdBlock Rules\n")
+            f.write("\n".join(rules))
+    except Exception as e:
+        print(f"エラー: 広告ブロックリストの保存に失敗しました: {e}", file=sys.stderr)
+        return False
+    return True
 # テーマ変更を通知するためのグローバルシグナルクラス
 class ThemeSignal(QObject):
     theme_changed = pyqtSignal(str)
@@ -100,22 +132,9 @@ class AdblockInterceptor(QWebEngineUrlRequestInterceptor):
         self.rules = self._load_rules()
 
     def _load_rules(self, file_path="adblock_list.txt"):
-        """ブロックリストをファイルから読み込む。"""
-        if not os.path.exists(file_path):
-            print(f"警告: 広告ブロックリスト '{file_path}' が見つかりません。基本的なルールを使用します。", file=sys.stderr)
-            # デフォルトの基本的なルール
-            return [
-                "doubleclick.net", "adservice.google.", "googlesyndication.com",
-                "googletagservices.com", "google-analytics.com", "scorecardresearch.com",
-                "/ad-", "/ads/", "/advert", "ad.doubleclick.net"
-            ]
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                # コメント行(#で始まる)と空行を無視する
-                return [line.strip() for line in f if line.strip() and not line.startswith('#')]
-        except Exception as e:
-            print(f"エラー: 広告ブロックリストの読み込みに失敗しました: {e}", file=sys.stderr)
-            return []
+        """ブロックリストを読み込む。"""
+        self.rules = load_adblock_rules()
+        return self.rules
 
     def interceptRequest(self, info: QWebEngineUrlRequestInfo):
         """リクエストをインターセプトし、ルールに一致すればブロックする。"""
@@ -194,7 +213,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None, settings_data=None, browser_version="未設定"): # browser_version引数を追加
         super().__init__(parent)
         self.setWindowTitle("Project-NOWB 設定")
-        self.setFixedSize(600, 650) # 少し大きめのウィンドウサイズ
+        self.setFixedSize(600, 750) # ウィンドウサイズを調整
         self.settings_data = settings_data or {}
         self.browser_version = browser_version # バージョン情報をインスタンス変数に保存
         self.init_ui()
@@ -293,14 +312,28 @@ class SettingsDialog(QDialog):
         self.restore_session_checkbox.setToolTip("このオプションを有効にすると、次回起動時に最後に開いていたタブが復元されます。")
         ui_layout.addWidget(self.restore_session_checkbox, 3, 0, 1, 3)
 
-        # 広告ブロッカー設定
-        self.adblock_checkbox = QCheckBox("広告ブロッカーを有効にする")
-        self.adblock_checkbox.setChecked(self.settings_data.get('adblock_enabled', True))
-        self.adblock_checkbox.setToolTip("一般的な広告やトラッカーをブロックします。一部のサイトの表示が崩れる可能性があります。")
-        ui_layout.addWidget(self.adblock_checkbox, 4, 0, 1, 3)
-
         ui_group.setLayout(ui_layout)
         main_layout.addWidget(ui_group, 2, 0, 1, 2)
+
+        # --- 広告ブロッカー設定グループ ---
+        adblock_group = QGroupBox("広告ブロッカー設定")
+        adblock_layout = QVBoxLayout()
+        
+        self.adblock_checkbox = QCheckBox("広告ブロッカーを有効にする")
+        self.adblock_checkbox.setChecked(self.settings_data.get('adblock_enabled', True))
+        self.adblock_checkbox.setToolTip("一般的な広告やトラッカーをブロックします。変更は即時反映されます。")
+        adblock_layout.addWidget(self.adblock_checkbox)
+
+        adblock_layout.addWidget(QLabel("ブロックルール (1行に1ルール):"))
+        self.adblock_rules_edit = QPlainTextEdit()
+        self.adblock_rules_edit.setPlaceholderText("例: doubleclick.net")
+        adblock_rules = load_adblock_rules()
+        self.adblock_rules_edit.setPlainText("\n".join(adblock_rules))
+        self.adblock_rules_edit.setFixedHeight(100) # 高さを固定
+        adblock_layout.addWidget(self.adblock_rules_edit)
+
+        adblock_group.setLayout(adblock_layout)
+        main_layout.addWidget(adblock_group, 3, 0, 1, 2)
 
         # --- OK/キャンセルボタン ---
         button_box = QHBoxLayout()
@@ -311,13 +344,20 @@ class SettingsDialog(QDialog):
         button_box.addStretch(1)
         button_box.addWidget(ok_button)
         button_box.addWidget(cancel_button)
-        main_layout.addLayout(button_box, 4, 0, 1, 2) # バージョンラベルの1つ上の行に配置
+        main_layout.addLayout(button_box, 5, 0, 1, 2)
 
         # --- バージョン情報表示 (最下部に配置) ---
         version_label = QLabel(f"バージョン: **Project-NOWB {self.browser_version}**")
         version_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom) # 右下寄せ
-        main_layout.addWidget(version_label, 5, 0, 1, 2) # 最下行、2列にまたがって配置
+        main_layout.addWidget(version_label, 6, 0, 1, 2)
 
+    def accept(self):
+        """OKボタンが押されたときの処理。ルールを保存してからダイアログを閉じる。"""
+        new_rules = self.adblock_rules_edit.toPlainText().strip().split('\n')
+        if not save_adblock_rules(new_rules):
+            QMessageBox.warning(self, "保存エラー", "広告ブロックルールの保存に失敗しました。")
+        
+        super().accept()
 
     def add_blocked_site(self):
         text, ok = QInputDialog.getText(self, "ブロックサイトの追加", "ブロックするURLを入力してください (例: twitter.com):")
@@ -663,6 +703,7 @@ class FullFeaturedBrowser(QMainWindow):
         super().__init__()
         self.is_private_window = is_private
         self.settings_file = 'project_nowb_settings.json'
+        self.history_file = 'project_nowb_history.json'
         self.adblock_interceptor = None
         self.qss_parts = {} # QSSを部品ごとに管理
 
@@ -932,10 +973,6 @@ class FullFeaturedBrowser(QMainWindow):
         if self.is_private_window:
             self.history_menu.setEnabled(False)
             self.bookmarks_menu.setEnabled(False)
-
-        # --- UIの初期化 ---
-        if not self.is_private_window:
-            self.setup_adblocker()
         self.update_palette_from_system_theme()
         theme_signal.theme_changed.connect(self.update_palette)
         self.update_background_image()
@@ -985,11 +1022,14 @@ class FullFeaturedBrowser(QMainWindow):
         if self.is_private_window:
             return
 
-        adblock_enabled = self.settings.get('adblock_enabled', True)
+        adblock_enabled = self.settings.get('adblock_enabled', False)
 
         if adblock_enabled:
             if not self.adblock_interceptor:
                 self.adblock_interceptor = AdblockInterceptor(self)
+            else:
+                # ルールが更新された可能性があるのでリロード
+                self.adblock_interceptor._load_rules()
             
             interceptor_to_set = self.adblock_interceptor
             status_message = "広告ブロッカー: ON"
@@ -1012,17 +1052,24 @@ class FullFeaturedBrowser(QMainWindow):
         """新しいプライベートブラウジングウィンドウを開く。"""
         if self.is_private_window:
             return # プライベートウィンドウからさらにプライベートウィンドウは開かない
+        
+        private_window = FullFeaturedBrowser(is_private=True, parent_settings=self.settings)
+        self.private_windows.append(private_window)
+        private_window.window_closed.connect(self.remove_private_window_from_list)
+        # 広告ブロッカーが有効なら、新しいプライベートウィンドウにも適用
+        if self.adblock_interceptor:
+            private_window.private_profile.setUrlRequestInterceptor(self.adblock_interceptor)
+        private_window.show()
 
-    def setup_hamburger_menu(self):
-        """
-        ハンバーガーメニューにアクションを追加する。
-        """
-        mod_key = "Ctrl"
-        if platform.system() == "Darwin":
-            mod_key = "Cmd"
-            
-        # ファイルメニュー
+    def _get_mod_key(self):
+        """OSに応じて修飾キー(Ctrl/Cmd)を返す。"""
+        return "Cmd" if platform.system() == "Darwin" else "Ctrl"
+
+    def _setup_file_menu(self):
+        """ファイルメニューを構築する。"""
+        mod_key = self._get_mod_key()
         file_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.file') if qta else "ファイル", "ファイル")
+        
         new_tab_action = QAction(qta.icon('fa5s.plus-square') if qta else "新しいタブ", "新しいタブ", self)
         new_tab_action.triggered.connect(lambda: self.add_new_tab())
         file_menu.addAction(new_tab_action)
@@ -1046,32 +1093,35 @@ class FullFeaturedBrowser(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # 表示メニュー
+    def _setup_view_menu(self):
+        """表示メニューを構築する。"""
+        mod_key = self._get_mod_key()
         view_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.eye') if qta else "表示", "表示")
+
         zoom_in_action = QAction(qta.icon('fa5s.search-plus') if qta else "拡大", "拡大", self)
         zoom_in_action.setShortcut(QKeySequence(f"{mod_key}++"))
         zoom_in_action.triggered.connect(self.zoom_in)
         view_menu.addAction(zoom_in_action)
+
         zoom_out_action = QAction(qta.icon('fa5s.search-minus') if qta else "縮小", "縮小", self)
         zoom_out_action.setShortcut(QKeySequence(f"{mod_key}+-"))
         zoom_out_action.triggered.connect(self.zoom_out)
         view_menu.addAction(zoom_out_action)
+
         reset_zoom_action = QAction(qta.icon('fa5s.search') if qta else "ズームをリセット", "ズームをリセット", self)
         reset_zoom_action.setShortcut(QKeySequence(f"{mod_key}+0"))
         reset_zoom_action.triggered.connect(self.reset_zoom)
         view_menu.addAction(reset_zoom_action)
         view_menu.addSeparator()
 
-        # ウェブパネルの表示/非表示アクション
         self.toggle_web_panel_action = QAction(qta.icon('fa5s.columns') if qta else "ウェブパネルを表示", "ウェブパネルを表示", self)
         self.toggle_web_panel_action.setCheckable(True)
-        # 初期状態を設定から反映
         if not self.is_private_window:
             is_visible = self.settings.get('web_panel_visible', False)
             self.toggle_web_panel_action.setChecked(is_visible)
             self.toggle_web_panel_action.setText("ウェブパネルを非表示" if is_visible else "ウェブパネルを表示")
         else:
-            self.toggle_web_panel_action.setEnabled(False) # プライベートウィンドウでは無効化
+            self.toggle_web_panel_action.setEnabled(False)
         self.toggle_web_panel_action.toggled.connect(self.toggle_web_panel)
         view_menu.addAction(self.toggle_web_panel_action)
         
@@ -1113,8 +1163,11 @@ class FullFeaturedBrowser(QMainWindow):
         set_speed_action.triggered.connect(self.set_scroll_speed)
         auto_scroll_menu.addAction(set_speed_action)
 
-        # ツールメニュー
+    def _setup_tools_menu(self):
+        """ツールメニューを構築する。"""
+        mod_key = self._get_mod_key()
         tools_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.tools') if qta else "ツール", "ツール")
+
         download_action = QAction(qta.icon('fa5s.download') if qta else "ダウンロード", "ダウンロード", self)
         download_action.triggered.connect(self.show_download_manager)
         tools_menu.addAction(download_action)
@@ -1124,7 +1177,6 @@ class FullFeaturedBrowser(QMainWindow):
         find_in_page_action.triggered.connect(self.find_in_page)
         tools_menu.addAction(find_in_page_action)
 
-        # ウェブパネルのURL設定アクション
         set_web_panel_url_action = QAction(qta.icon('fa5s.cog') if qta else "ウェブパネルのURLを設定", "ウェブパネルのURLを設定", self)
         set_web_panel_url_action.triggered.connect(self.set_web_panel_url)
         if self.is_private_window:
@@ -1139,11 +1191,10 @@ class FullFeaturedBrowser(QMainWindow):
         translate_action.triggered.connect(self.translate_page)
         tools_menu.addAction(translate_action)
 
-        tab_group_menu = tools_menu.addMenu(qta.icon('fa5s.object-group') if qta else "タブグループ", "タブグループ")
+        self.tab_group_menu = tools_menu.addMenu(qta.icon('fa5s.object-group') if qta else "タブグループ", "タブグループ")
         create_group_action = QAction(qta.icon('fa5s.plus-square') if qta else "新しいグループを作成", "新しいグループを作成", self)
         create_group_action.triggered.connect(self.create_tab_group)
-        tab_group_menu.addAction(create_group_action)
-        self.tab_group_menu = tab_group_menu
+        self.tab_group_menu.addAction(create_group_action)
 
         notes_action = QAction(qta.icon('fa5s.sticky-note') if qta else "シンプルメモ帳", "シンプルメモ帳", self)
         notes_action.triggered.connect(self.show_notes_dialog)
@@ -1164,19 +1215,21 @@ class FullFeaturedBrowser(QMainWindow):
         analyze_sentiment_action = QAction(qta.icon('fa5s.smile-beam') if qta else "ページ内感情分析", "ページ内感情分析", self)
         analyze_sentiment_action.triggered.connect(self.analyze_sentiment)
         tools_menu.addAction(analyze_sentiment_action)
-        
-        # お気に入り/ブックマーク
+
+    def _setup_history_bookmarks_menu(self):
+        """履歴とブックマークメニューを構築する。"""
         self.bookmarks_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.star') if qta else "ブックマーク", "ブックマーク")
         self.bookmarks = self.settings['favorite_sites']
         self.update_bookmarks_menu()
 
-        # 履歴
         self.history_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.history') if qta else "履歴", "履歴")
-        self.history = []
+        self.load_history()
         self.update_history_menu()
 
-        # お楽しみメニュー
+    def _setup_fun_menu(self):
+        """お楽しみメニューを構築する。"""
         fun_menu = self.hamburger_menu.addMenu(qta.icon('fa5s.grin-stars') if qta else "お楽しみ", "お楽しみ")
+
         preaching_mode_action = QAction(qta.icon('fa5s.user-clock') if qta else "集中ポーション (ON/OFF)", "集中ポーション (ON/OFF)", self)
         preaching_mode_action.setCheckable(True)
         preaching_mode_action.triggered.connect(self.toggle_preaching_mode)
@@ -1203,6 +1256,16 @@ class FullFeaturedBrowser(QMainWindow):
         mission_mode_action.triggered.connect(self.start_mission_mode)
         fun_menu.addAction(mission_mode_action)
 
+    def setup_hamburger_menu(self):
+        """
+        ハンバーガーメニューにアクションを追加する。
+        """
+        self._setup_file_menu()
+        self._setup_view_menu()
+        self._setup_tools_menu()
+        self._setup_history_bookmarks_menu()
+        self._setup_fun_menu()
+
         # 設定メニュー
         settings_action = QAction(qta.icon('fa5s.cog') if qta else "設定を開く", "設定を開く", self)
         settings_action.triggered.connect(self.show_settings_dialog)
@@ -1222,7 +1285,7 @@ class FullFeaturedBrowser(QMainWindow):
             return {}
         if os.path.exists(self.settings_file):
             try:
-                with open(self.settings_file, 'r') as f:
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except json.JSONDecodeError:
                 print("設定ファイルが破損しています。新しく作成します。", file=sys.stderr)
@@ -1260,21 +1323,48 @@ class FullFeaturedBrowser(QMainWindow):
         # self.settings の内容を settings_data にコピーしてから保存
         self.settings_data.update(self.settings)
 
-        with open(self.settings_file, 'w') as f:
-            json.dump(self.settings_data, f, indent=4)
+        try:
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(self.settings_data, f, indent=4, ensure_ascii=False)
+        except IOError as e:
+            print(f"設定ファイルの保存に失敗しました: {e}", file=sys.stderr)
+
+    def load_history(self):
+        """履歴をファイルから読み込む。"""
+        if self.is_private_window:
+            self.history = []
+            return
+
+        if os.path.exists(self.history_file):
+            try:
+                with open(self.history_file, 'r', encoding='utf-8') as f:
+                    self.history = json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"履歴ファイルの読み込みに失敗しました: {e}", file=sys.stderr)
+                self.history = []
+        else:
+            self.history = []
+
+    def save_history(self):
+        """履歴をファイルに保存する。"""
+        if self.is_private_window:
+            return
+        try:
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump(self.history, f, indent=4, ensure_ascii=False)
+        except IOError as e:
+            print(f"履歴ファイルの保存に失敗しました: {e}", file=sys.stderr)
 
     def closeEvent(self, event):
         """ウィンドウが閉じられたときに設定を保存する。"""
         if not self.is_private_window:
             # 管理しているすべてのプライベートウィンドウを閉じる
             # イテレート中にリストを変更する可能性があるため、リストのコピーを作成
-            # 終了前にセッションを保存
-            self.save_settings()
-        else:
-            # プライベートウィンドウの場合はセッションをクリア
             for p_win in list(self.private_windows):
                 p_win.close()
+            # 終了前にセッションと履歴を保存
             self.save_settings()
+            self.save_history()
         
         self.window_closed.emit(self)
         event.accept()
@@ -1307,7 +1397,8 @@ class FullFeaturedBrowser(QMainWindow):
     def handle_fullscreen_request(self, request, originating_page):
         """ウェブページからのフルスクリーン要求を処理する。"""
         # 現在表示されているタブからの要求でなければ無視
-        if originating_page != self.tabs.currentWidget().page():
+        current_widget = self.tabs.currentWidget()
+        if not isinstance(current_widget, QWebEngineView) or originating_page != current_widget.page():
             request.reject()
             return
 
@@ -1628,6 +1719,8 @@ class FullFeaturedBrowser(QMainWindow):
         """
         現在のページ情報をステータスバーに表示する。
         """
+        if not isinstance(browser, QWebEngineView):
+            return
         title = browser.title()
         url = browser.url().toString()
         status_text = f"ページ情報: {title} | {url}"
@@ -1639,20 +1732,13 @@ class FullFeaturedBrowser(QMainWindow):
         self.download_manager.raise_()
         self.download_manager.activateWindow()
 
-        private_window = FullFeaturedBrowser(is_private=True, parent_settings=self.settings)
-        self.private_windows.append(private_window)
-        private_window.window_closed.connect(self.remove_private_window_from_list)
-        # 広告ブロッカーが有効なら、新しいプライベートウィンドウにも適用
-        if self.adblock_interceptor:
-            private_window.private_profile.setUrlRequestInterceptor(self.adblock_interceptor)
-        private_window.show()
-
     def remove_private_window_from_list(self, window):
         if window in self.private_windows:
             self.private_windows.remove(window)
 
     def close_current_tab(self, index):
-        if self.tabs.count() < 2:
+        """指定されたインデックスのタブを閉じる。最後のタブは閉じない。"""
+        if self.tabs.count() <= 1:
             return
         
         widget_to_close = self.tabs.widget(index)
@@ -1679,15 +1765,6 @@ class FullFeaturedBrowser(QMainWindow):
 
             # ウィジェットを後で安全に削除するようにスケジュール
             widget_to_close.deleteLater()
-
-        # 最後のタブは閉じないようにする
-        if self.tabs.count() <= 1:
-            # 最後のタブを閉じようとした場合は、新しいタブを開いてから閉じる
-            if index == 0:
-                self.add_new_tab(QUrl(self.settings['home_url']))
-            else:
-                # このケースは通常発生しないはずだが、念のため
-                return
 
         self.tabs.removeTab(index)
         self.update_tab_groups_menu()
@@ -1848,7 +1925,10 @@ class FullFeaturedBrowser(QMainWindow):
 
     def update_url_bar_on_tab_change(self, index):
         current_browser = self.tabs.currentWidget()
-        if current_browser: self.url_bar.setText(current_browser.url().toString())
+        if isinstance(current_browser, QWebEngineView):
+            self.url_bar.setText(current_browser.url().toString())
+        elif isinstance(current_browser, UnloadedTabPlaceholder):
+            self.url_bar.setText(current_browser.url.toString())
 
     def update_progress_bar(self, progress):
         if progress < 100:
@@ -1985,7 +2065,7 @@ class FullFeaturedBrowser(QMainWindow):
             self.statusBar().showMessage("ページの翻訳を試みています...", 3000)
             QMessageBox.information(self, "自動翻訳", "これはシミュレートされた機能です。")
     def create_tab_group(self):
-        tabs_to_group = [self.tabs.widget(i).url().toString() for i in range(self.tabs.count())]
+        tabs_to_group = [self.tabs.widget(i).url().toString() for i in range(self.tabs.count()) if isinstance(self.tabs.widget(i), QWebEngineView)]
         if not tabs_to_group: return
         group_name, ok = QInputDialog.getText(self, "タブグループを作成", "グループ名を入力してください:")
         if ok and group_name:
@@ -1995,12 +2075,11 @@ class FullFeaturedBrowser(QMainWindow):
             self.statusBar().showMessage(f"タブグループ '{group_name}' が作成されました。", 3000)
             self.update_tab_groups_menu()
     def update_tab_groups_menu(self):
-        tab_group_menu = self.findChild(QMenu, "タブグループ")
-        if not tab_group_menu: return
-        actions_to_remove = [action for action in tab_group_menu.actions() if action.text() not in ["新しいグループを作成", "現在のタブをグループに追加"]]
-        for action in actions_to_remove: tab_group_menu.removeAction(action)
+        if not hasattr(self, 'tab_group_menu'): return
+        actions_to_remove = [action for action in self.tab_group_menu.actions() if action.text() not in ["新しいグループを作成", "現在のタブをグループに追加"]]
+        for action in actions_to_remove: self.tab_group_menu.removeAction(action)
         if self.tab_groups:
-            tab_group_menu.addSeparator()
+            self.tab_group_menu.addSeparator()
             for group_id, group_info in self.tab_groups.items():
                 group_name = group_info['name']
                 group_action = QAction(f"グループを開く: {group_name}", self)
@@ -2054,6 +2133,9 @@ class FullFeaturedBrowser(QMainWindow):
             
             # 広告ブロッカーの設定を更新
             self.setup_adblocker()
+            
+            # UIの更新をトリガー
+            self.update_palette(get_system_theme_mode())
             
             self.save_settings() # 変更をファイルに保存
             self.statusBar().showMessage("設定が保存されました！", 3000)
@@ -2118,10 +2200,21 @@ class FullFeaturedBrowser(QMainWindow):
             return
         try:
             url_str = qurl.toString()
-            if self.history and self.history[-1][1] == url_str: return
-            title = self.tabs.currentWidget().title() if self.tabs.currentWidget() else url_str
-            self.history.append((title, url_str))
-            if len(self.history) > 100: self.history.pop(0)
+            if url_str == "about:blank":
+                return
+            if self.history and self.history[-1]["url"] == url_str:
+                return
+
+            current_widget = self.tabs.currentWidget()
+            title = current_widget.title() if isinstance(current_widget, QWebEngineView) and current_widget.title() else url_str
+            
+            entry = {
+                "title": title,
+                "url": url_str,
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+            self.history.append(entry)
+            if len(self.history) > 200: self.history.pop(0)
             self.update_history_menu()
         except RuntimeError:
             # self.tabs might be deleted during shutdown.
@@ -2131,20 +2224,30 @@ class FullFeaturedBrowser(QMainWindow):
         if self.is_private_window:
             return
         self.history_menu.clear()
-        for title, url in reversed(self.history):
+        # 履歴はタイムスタンプの降順で表示
+        for entry in sorted(self.history, key=lambda x: x.get('timestamp', ''), reverse=True):
+            title = entry.get('title', 'No Title')
+            url = entry.get('url', '')
             action = QAction(title, self)
+            action.setToolTip(url)
             action.triggered.connect(lambda checked, u=url, t=title: self.add_new_tab(QUrl(u), t))
             self.history_menu.addAction(action)
         self.history_menu.addSeparator()
         clear_history_action = QAction(qta.icon('fa5s.trash-alt') if qta else "履歴をクリア", "履歴をクリア", self)
         clear_history_action.triggered.connect(self.clear_history)
         self.history_menu.addAction(clear_history_action)
+
     def clear_history(self):
         if self.is_private_window:
             return
-        self.history = []
-        self.update_history_menu()
-        print("履歴をクリアしました。")
+        reply = QMessageBox.question(self, "履歴のクリア", "本当にすべての履歴を削除しますか？",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self.history = []
+            self.update_history_menu()
+            self.save_history()
+            self.statusBar().showMessage("履歴をクリアしました。", 2000)
     def toggle_preaching_mode(self, checked):
         self.is_preaching_mode_active = checked
         if checked:
@@ -2498,8 +2601,8 @@ class FullFeaturedBrowser(QMainWindow):
         """
         if self.history:
             random_entry = random.choice(self.history)
-            url = random_entry[1]
-            title = random_entry[0]
+            url = random_entry["url"]
+            title = random_entry["title"]
             self.add_new_tab(QUrl(url), title)
             self.statusBar().showMessage(f"ランダムサイトジャンプ！'{title}'にアクセスします。", 5000)
         else:
@@ -2690,6 +2793,11 @@ if __name__ == '__main__':
     # --- メインウィンドウの作成と表示 ---
     window = FullFeaturedBrowser() # 時間のかかる初期化処理
     window.show()
+
+    # 広告ブロッカーの初期設定
+    if not window.is_private_window:
+        window.setup_adblocker()
+
     splash.finish(window) # メインウィンドウが表示されたらスプラッシュスクリーンを閉じる
 
     sys.exit(app.exec())
