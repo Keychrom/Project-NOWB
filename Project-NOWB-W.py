@@ -27,6 +27,15 @@ from PyQt6.QtWebEngineCore import (QWebEngineSettings, QWebEngineDownloadRequest
                                   QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo)
 from PyQt6.QtGui import QDesktopServices
 
+# --- Feature detection for version compatibility ---
+try:
+    # For recent PyQt6 versions
+    FULLSCREEN_FEATURE = QWebEnginePage.Feature.FullScreenRequested
+except AttributeError:
+    # Fallback for older PyQt6 versions where this enum member is missing.
+    # The integer value is 7.
+    FULLSCREEN_FEATURE = 7
+
 # --- 定数定義 ---
 ADBLOCK_RULES_FILE = "adblock_list.txt"
 DEFAULT_ADBLOCK_RULES = [
@@ -84,7 +93,7 @@ class CustomWebEnginePage(QWebEnginePage):
         ウェブページからの機能利用許可リクエストを処理する。
         特にフルスクリーンリクエストを許可する。
         """
-        if feature == QWebEnginePage.Feature.FullScreenRequested:
+        if feature == FULLSCREEN_FEATURE:
             self.setFeaturePermission(url, feature, QWebEnginePage.PermissionPolicy.PermissionGrantedByUser)
 
 class WorkerSignals(QObject):
