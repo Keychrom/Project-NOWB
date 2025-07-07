@@ -23,25 +23,36 @@
     "custom_css": "",
     "window_size": [
         1151,
-        768
+        856
     ],
     "window_pos": [
         333,
-        38
+        0
     ],
     "web_panel_url": "https://www.bing.com/chat",
     "web_panel_visible": true,
     "splitter_sizes": [
-        1146,
+        1915,
         0
     ],
     "adblock_enabled": true,
     "restore_last_session": true,
     "last_session": [
         "https://start.popmix-os.net/",
-        "https://www.bing.com/?scope=web&cc=JP",
-        "https://www.msn.com/ja-jp/health/other/統合失調症の姉を家に閉じ込めた両親-我が家は失敗例-家族が全てケアは-美徳ではない/ar-AA1I346I?ocid=BingHp01&cvid=07d6a0b1f15c4491e38a04446733737e&ei=14"
+        "https://www.bing.com/search?q=Afdsajih%5D&qs=n&form=QBRE&sp=-1&ghc=1&lq=0&pq=afdsajih%5D&sc=0-9&sk=&cvid=D3C8D66353FC4B3D9FAC1652D796E67A"
     ],
     "search_engine_url": "https://www.google.com/search?q=",
-    "theme": "dark"
+    "theme": "dark",
+    "mouse_gestures_enabled": true,
+    "mouse_gesture_mappings": {
+        "D": "scroll_bottom",
+        "DL": "close_tab",
+        "DR": "new_tab",
+        "L": "back",
+        "LU": "prev_tab",
+        "R": "forward",
+        "RU": "next_tab",
+        "U": "scroll_top",
+        "UR": "reload"
+    }
 }
