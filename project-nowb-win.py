@@ -1412,6 +1412,8 @@ class FullFeaturedBrowser(QMainWindow):
                     margin-right: 1px;
                     border-top-left-radius: 8px;
                     border-top-right-radius: 8px;
+                    width: 100px; /* タブの幅を固定 */
+                    elide-mode: elide-right; /* はみ出したテキストを省略 */
                 }
                 QTabBar::tab:selected {
                     background-color: #2D2D2D; /* ウィンドウ背景と同じ色 */
@@ -1442,6 +1444,8 @@ class FullFeaturedBrowser(QMainWindow):
                     margin-right: 1px;
                     border-top-left-radius: 8px;
                     border-top-right-radius: 8px;
+                    width: 100px; /* タブの幅を固定 */
+                    elide-mode: elide-right; /* はみ出したテキストを省略 */
                 }}
                 QTabBar::tab:selected {{
                     background-color: {window_color};
@@ -2785,6 +2789,8 @@ if __name__ == '__main__':
                 margin-right: 1px;
                 border-top-left-radius: 8px;
                 border-top-right-radius: 8px;
+                width: 100px; /* タブの幅を固定 */
+                elide-mode: elide-right; /* はみ出したテキストを省略 */
             }}
             QTabBar::tab:selected {{
                 background-color: #2D2D2D;
