@@ -1088,6 +1088,11 @@ class FullFeaturedBrowser(QMainWindow):
         set_speed_action.triggered.connect(self.set_scroll_speed)
         auto_scroll_menu.addAction(set_speed_action)
 
+        view_menu.addSeparator()
+        reader_mode_action = QAction(qta.icon('fa5s.book-reader') if qta else "リーダーモード", "リーダーモード", self)
+        reader_mode_action.triggered.connect(self.toggle_reader_mode)
+        view_menu.addAction(reader_mode_action)
+
     def _setup_tools_menu(self):
         """ツールメニューを構築する。"""
         mod_key = self._get_mod_key()
@@ -2620,6 +2625,61 @@ class FullFeaturedBrowser(QMainWindow):
         random_mission = random.choice(missions)
         QMessageBox.information(self, "ミッション開始！", f"あなたのミッションは…**'{random_mission}'**\n\nミッションの成功を祈ります！")
         self.statusBar().showMessage("新しいミッションが割り当てられました。", 5000)
+
+    def toggle_reader_mode(self):
+        """
+        現在のページを読みやすいリーダーモードに切り替える。
+        MozillaのReadability.jsを利用します。
+        """
+        current_browser = self.tabs.currentWidget()
+        if not isinstance(current_browser, QWebEngineView):
+            return
+
+        # Readability.jsのパス (スクリプトと同じディレクトリにあると仮定)
+        readability_path = "Readability.js"
+
+        if not os.path.exists(readability_path):
+            QMessageBox.warning(self, "エラー", f"`{readability_path}` が見つかりません。\nリーダーモード機能を利用するには、MozillaのReadability.jsをダウンロードして同じフォルダに配置してください。")
+            return
+
+        try:
+            with open(readability_path, 'r', encoding='utf-8') as f:
+                readability_script = f.read()
+        except Exception as e:
+            QMessageBox.critical(self, "ファイル読み込みエラー", f"Readability.jsの読み込みに失敗しました: {e}")
+            return
+
+        # リーダーモード用のCSS
+        reader_css = """
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", "Hiragino Kaku Gothic ProN", "Hiragino Sans", "BIZ UDPGothic", Meiryo, sans-serif; line-height: 1.7; max-width: 40em; margin: 0 auto; padding: 2em; background: #f9f9f9; color: #333; }
+            h1, h2, h3 { line-height: 1.2; }
+            a { color: #0078D7; }
+            img, video { max-width: 100%; height: auto; }
+            pre, code { white-space: pre-wrap; word-wrap: break-word; }
+            /* ダークモード対応 */
+            @media (prefers-color-scheme: dark) {
+                body { background: #2d2d2d; color: #f0f0f0; }
+                a { color: #4fc3f7; }
+            }
+        """
+
+        # 実行するJavaScriptコード
+        js_code = f'''
+            if (document.getElementById('reader-view-style')) {{
+                window.location.reload();
+            }} else {{
+                {readability_script}
+                var article = new Readability(document.cloneNode(true)).parse();
+                if (article) {{
+                    document.head.innerHTML = `<meta charset="UTF-8"><title>${{article.title}}</title><style id="reader-view-style">{reader_css}</style>`;
+                    document.body.innerHTML = `<h1>${{article.title}}</h1><div>${{article.byline || ''}}</div><hr>${{article.content}}`;
+                }} else {{
+                    alert("この記事はリーダーモードで表示できません。");
+                }}
+            }}
+        '''
+        current_browser.page().runJavaScript(js_code)
+        self.statusBar().showMessage("リーダーモードを切り替えました。", 3000)
 
 def handle_first_run():
     """初回起動時の設定を行い、設定ファイルを生成する。"""
