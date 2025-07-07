@@ -23,7 +23,7 @@
     "custom_css": "",
     "window_size": [
         1151,
-        856
+        894
     ],
     "window_pos": [
         333,
@@ -32,14 +32,13 @@
     "web_panel_url": "https://www.bing.com/chat",
     "web_panel_visible": true,
     "splitter_sizes": [
-        1915,
+        1146,
         0
     ],
     "adblock_enabled": true,
     "restore_last_session": true,
     "last_session": [
-        "https://start.popmix-os.net/",
-        "https://www.bing.com/search?q=Afdsajih%5D&qs=n&form=QBRE&sp=-1&ghc=1&lq=0&pq=afdsajih%5D&sc=0-9&sk=&cvid=D3C8D66353FC4B3D9FAC1652D796E67A"
+        "https://start.popmix-os.net/"
     ],
     "search_engine_url": "https://www.google.com/search?q=",
     "theme": "dark",
@@ -54,5 +53,6 @@
         "RU": "next_tab",
         "U": "scroll_top",
         "UR": "reload"
-    }
+    },
+    "gesture_disabled_sites": []
 }

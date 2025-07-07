@@ -9,12 +9,11 @@ import re
 from urllib.parse import urlparse
 from PyQt6.QtCore import QUrl, QFileInfo, Qt, QTimer, QSize, pyqtSignal, QObject, QCoreApplication, QStandardPaths, QRunnable, QThreadPool
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QToolBar, QLineEdit,
-                             QTabWidget, QProgressBar, QMenu, QFileDialog, QInputDialog, QTableWidget,
+                             QTabWidget, QProgressBar, QMenu, QFileDialog, QInputDialog,
                              QComboBox, QMessageBox, QSlider, QLabel, QWidget,
                              QCheckBox, QSplitter, QDialog, QGridLayout, QListWidget,
                              QPushButton, QVBoxLayout, QHBoxLayout, QGroupBox,
-                             QListWidgetItem, QPlainTextEdit, QStyle, QSplashScreen,
-                             QTableWidgetItem)
+                             QListWidgetItem, QPlainTextEdit, QStyle, QSplashScreen)
 from PyQt6.QtGui import QAction, QKeySequence, QColor, QPalette, QImage, QPainter, QPixmap, QIcon, QBrush
 
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -44,32 +43,6 @@ DEFAULT_ADBLOCK_RULES = [
     "googletagservices.com", "google-analytics.com", "scorecardresearch.com",
     "/ad-", "/ads/", "/advert", "ad.doubleclick.net"
 ]
-
-# --- マウスジェスチャー関連の定数 ---
-AVAILABLE_GESTURE_ACTIONS = {
-    "none": "何もしない",
-    "back": "戻る",
-    "forward": "進む",
-    "reload": "リロード",
-    "new_tab": "新しいタブを開く",
-    "close_tab": "現在のタブを閉じる",
-    "scroll_top": "ページの先頭へ",
-    "scroll_bottom": "ページの末尾へ",
-    "prev_tab": "前のタブへ",
-    "next_tab": "次のタブへ",
-}
-
-DEFAULT_GESTURE_MAPPINGS = {
-    "L": "back", "R": "forward", "U": "scroll_top", "D": "scroll_bottom",
-    "UR": "reload", "DR": "new_tab", "DL": "close_tab",
-    "LU": "prev_tab", "RU": "next_tab",
-}
-
-GESTURE_VISUAL_MAP = {
-    "L": "←", "R": "→", "U": "↑", "D": "↓",
-    "UR": "↑→", "UL": "↑←", "DR": "↓→", "DL": "↓←",
-    "LU": "←↑", "LD": "←↓", "RU": "→↑", "RD": "→↓",
-}
 
 def load_adblock_rules():
     """広告ブロックリストをファイルから読み込む共通関数。"""
@@ -249,11 +222,9 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None, settings_data=None, browser_version="未設定"): # browser_version引数を追加
         super().__init__(parent)
         self.setWindowTitle("Project-NOWB 設定")
-        self.setMinimumSize(600, 800) # ウィンドウサイズを調整
+        self.setFixedSize(600, 750) # ウィンドウサイズを調整
         self.settings_data = settings_data or {}
         self.browser_version = browser_version # バージョン情報をインスタンス変数に保存
-        # get_settingsで表示名から内部キーを逆引きするために使用
-        self.gesture_action_map_rev = {v: k for k, v in AVAILABLE_GESTURE_ACTIONS.items()}
         self.init_ui()
 
     def init_ui(self):
@@ -373,44 +344,6 @@ class SettingsDialog(QDialog):
         adblock_group.setLayout(adblock_layout)
         main_layout.addWidget(adblock_group, 3, 0, 1, 2)
 
-        # --- マウスジェスチャー設定グループ ---
-        mouse_gesture_group = QGroupBox("マウスジェスチャー設定")
-        mouse_gesture_layout = QVBoxLayout()
-
-        self.gesture_enabled_checkbox = QCheckBox("マウスジェスチャーを有効にする")
-        self.gesture_enabled_checkbox.setChecked(self.settings_data.get('mouse_gestures_enabled', True))
-        mouse_gesture_layout.addWidget(self.gesture_enabled_checkbox)
-
-        self.gesture_mappings_table = QTableWidget()
-        self.gesture_mappings_table.setColumnCount(2)
-        self.gesture_mappings_table.setHorizontalHeaderLabels(["ジェスチャー", "アクション"])
-        self.gesture_mappings_table.horizontalHeader().setStretchLastSection(True)
-
-        current_mappings = self.settings_data.get('mouse_gesture_mappings', DEFAULT_GESTURE_MAPPINGS)
-
-        # テーブルに行を追加
-        row = 0
-        # 常にデフォルトのジェスチャーセットを表示し、設定にないものは "none" にする
-        for gesture_code in sorted(DEFAULT_GESTURE_MAPPINGS.keys()):
-            self.gesture_mappings_table.insertRow(row)
-            visual = GESTURE_VISUAL_MAP.get(gesture_code, gesture_code)
-            gesture_item = QTableWidgetItem(f"{visual} ({gesture_code})")
-            gesture_item.setFlags(gesture_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.gesture_mappings_table.setItem(row, 0, gesture_item)
-
-            action_combo = QComboBox()
-            action_combo.addItems(AVAILABLE_GESTURE_ACTIONS.values())
-            current_action_key = current_mappings.get(gesture_code, "none")
-            current_action_name = AVAILABLE_GESTURE_ACTIONS.get(current_action_key, "何もしない")
-            action_combo.setCurrentText(current_action_name)
-            self.gesture_mappings_table.setCellWidget(row, 1, action_combo)
-            row += 1
-
-        self.gesture_mappings_table.resizeColumnsToContents()
-        mouse_gesture_layout.addWidget(self.gesture_mappings_table)
-        mouse_gesture_group.setLayout(mouse_gesture_layout)
-        main_layout.addWidget(mouse_gesture_group, 4, 0, 1, 2)
-
         # --- OK/キャンセルボタン ---
         button_box = QHBoxLayout()
         ok_button = QPushButton("OK")
@@ -420,12 +353,12 @@ class SettingsDialog(QDialog):
         button_box.addStretch(1)
         button_box.addWidget(ok_button)
         button_box.addWidget(cancel_button)
-        main_layout.addLayout(button_box, 6, 0, 1, 2)
+        main_layout.addLayout(button_box, 5, 0, 1, 2)
 
         # --- バージョン情報表示 (最下部に配置) ---
         version_label = QLabel(f"バージョン: **Project-NOWB {self.browser_version}**")
         version_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom) # 右下寄せ
-        main_layout.addWidget(version_label, 7, 0, 1, 2)
+        main_layout.addWidget(version_label, 6, 0, 1, 2)
 
     def accept(self):
         """OKボタンが押されたときの処理。ルールを保存してからダイアログを閉じる。"""
@@ -487,7 +420,7 @@ class SettingsDialog(QDialog):
         })
         selected_engine_url = search_engines_data.get(selected_engine_name, "https://www.google.com/search?q=")
 
-        new_settings = {
+        return {
             'home_url': self.home_url_input.text(),
             'blocked_sites': new_blocked_sites,
             'search_engine_name': selected_engine_name, # 新しく選択された検索エンジンの名前
@@ -497,23 +430,7 @@ class SettingsDialog(QDialog):
             'custom_css': self.custom_css_input.toPlainText(),
             'restore_last_session': self.restore_session_checkbox.isChecked(),
             'adblock_enabled': self.adblock_checkbox.isChecked(),
-            'mouse_gestures_enabled': self.gesture_enabled_checkbox.isChecked(),
         }
-
-        new_mappings = {}
-        for row in range(self.gesture_mappings_table.rowCount()):
-            gesture_item = self.gesture_mappings_table.item(row, 0)
-            # "↑→ (UR)" のようなテキストから "UR" を抽出
-            match = re.search(r'\((\w+)\)', gesture_item.text())
-            if match:
-                gesture_code = match.group(1)
-                action_combo = self.gesture_mappings_table.cellWidget(row, 1)
-                selected_action_name = action_combo.currentText()
-                action_key = self.gesture_action_map_rev.get(selected_action_name, "none")
-                new_mappings[gesture_code] = action_key
-
-        new_settings['mouse_gesture_mappings'] = new_mappings
-        return new_settings
 
 class DownloadItemWidget(QWidget):
     """個々のダウンロードアイテムを表示・管理するウィジェット。"""
@@ -787,66 +704,6 @@ class UnloadedTabPlaceholder(QWidget):
         layout.addWidget(label)
         self.setAutoFillBackground(True)
 
-class MouseGestureWebEngineView(QWebEngineView):
-    """
-    マウスジェスチャー機能を実装したQWebEngineView。
-    ジェスチャーが認識されると gesture_triggered シグナルを発行する。
-    """
-    gesture_triggered = pyqtSignal(str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._gesture_active = False
-        self._last_pos = None
-        self._gesture_directions = []
-        self._gesture_threshold = 20 # ジェスチャーを認識する最小移動距離
-        self._gesture_performed = False
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.RightButton:
-            self._gesture_active = True
-            self._gesture_performed = False
-            self._last_pos = event.position().toPoint()
-            self._gesture_directions = []
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self._gesture_active and event.buttons() & Qt.MouseButton.RightButton:
-            current_pos = event.position().toPoint()
-            dx = current_pos.x() - self._last_pos.x()
-            dy = current_pos.y() - self._last_pos.y()
-
-            # 一定の距離を移動した場合にのみ方向を記録
-            if (dx**2 + dy**2) > self._gesture_threshold**2:
-                direction = ''
-                if abs(dx) > abs(dy):
-                    direction = 'R' if dx > 0 else 'L'
-                else:
-                    direction = 'D' if dy > 0 else 'U'
-                
-                if not self._gesture_directions or self._gesture_directions[-1] != direction:
-                    self._gesture_directions.append(direction)
-                
-                self._last_pos = current_pos
-            event.accept()
-            return # ジェスチャー中はsuperを呼ばず、テキスト選択などを防ぐ
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.RightButton and self._gesture_active:
-            self._gesture_active = False
-            gesture_str = "".join(self._gesture_directions)
-            if gesture_str:
-                self.gesture_triggered.emit(gesture_str)
-                self._gesture_performed = True
-        super().mouseReleaseEvent(event)
-
-    def contextMenuEvent(self, event):
-        if self._gesture_performed:
-            self._gesture_performed = False # フラグをリセット
-            event.accept() # コンテキストメニューを抑制
-        else:
-            super().contextMenuEvent(event)
 
 class FullFeaturedBrowser(QMainWindow):
     window_closed = pyqtSignal(object)
@@ -1697,8 +1554,7 @@ class FullFeaturedBrowser(QMainWindow):
         """
         # createWindowからのリクエストを処理
         if page_to_set:
-            browser = MouseGestureWebEngineView()
-            browser.gesture_triggered.connect(self.handle_mouse_gesture)
+            browser = QWebEngineView()
             browser.settings().setAttribute(QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True)
             browser.setPage(page_to_set)
             # 元のタブがプライベートモードかチェックしてラベルを設定
@@ -1724,8 +1580,8 @@ class FullFeaturedBrowser(QMainWindow):
                         QMessageBox.warning(self, "集中ポーションが発動中！", "さぼっちゃダメ！作業に戻りましょう！")
                         return None, None # タブ作成を中止
             
-            browser = MouseGestureWebEngineView()
-            browser.gesture_triggered.connect(self.handle_mouse_gesture)
+            browser = QWebEngineView()
+
             if self.is_private_window:
                 page = CustomWebEnginePage(self.private_profile, browser)
                 browser.setPage(page)
@@ -1845,41 +1701,6 @@ class FullFeaturedBrowser(QMainWindow):
 
         self.tabs.removeTab(index)
         self.update_tab_groups_menu()
-
-    def handle_mouse_gesture(self, gesture):
-        """マウスジェスチャーに基づいてアクションを実行する。"""
-        if not self.settings.get('mouse_gestures_enabled', True):
-            return
-
-        current_browser = self.tabs.currentWidget()
-        if not isinstance(current_browser, QWebEngineView):
-            return
-
-        mappings = self.settings.get('mouse_gesture_mappings', DEFAULT_GESTURE_MAPPINGS)
-        action_key = mappings.get(gesture)
-
-        if not action_key or action_key == "none":
-            return
-
-        # アクションキーと実際のメソッドをマッピング
-        action_executors = {
-            "back": lambda: current_browser.back(),
-            "forward": lambda: current_browser.forward(),
-            "reload": lambda: current_browser.reload(),
-            "new_tab": lambda: self.add_new_tab(),
-            "close_tab": lambda: self.close_current_tab(self.tabs.currentIndex()),
-            "scroll_top": lambda: current_browser.page().runJavaScript("window.scrollTo(0, 0);"),
-            "scroll_bottom": lambda: current_browser.page().runJavaScript("window.scrollTo(0, document.body.scrollHeight);"),
-            "prev_tab": lambda: self.tabs.setCurrentIndex((self.tabs.currentIndex() - 1 + self.tabs.count()) % self.tabs.count()),
-            "next_tab": lambda: self.tabs.setCurrentIndex((self.tabs.currentIndex() + 1) % self.tabs.count()),
-        }
-
-        if action_key in action_executors:
-            action_executors[action_key]()
-            # 表示名を取得してステータスバーに表示
-            action_name = AVAILABLE_GESTURE_ACTIONS.get(action_key, "不明なアクション")
-            self.statusBar().showMessage(f"ジェスチャー: {action_name}", 2000)
-
     def reset_sleep_timer(self): self.sleep_timer.start()
 
     def handle_link_hovered(self, url):
@@ -2831,9 +2652,7 @@ def handle_first_run():
         'splitter_sizes': [800, 250],
         'adblock_enabled': True,
         'restore_last_session': True,
-        'last_session': [],
-        'mouse_gestures_enabled': True,
-        'mouse_gesture_mappings': DEFAULT_GESTURE_MAPPINGS,
+        'last_session': []
     }
 
     initial_dialog_settings = {
