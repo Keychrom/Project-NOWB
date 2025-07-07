@@ -727,7 +727,7 @@ class FullFeaturedBrowser(QMainWindow):
         # Download Managerは必要になった時に初期化する（起動時間短縮のため）
         self.download_manager = None
         # ここにバージョン情報を定義
-        self.browser_version = "V1.0.0-Beta1.B1"
+        self.browser_version = "V1.0.0-Beta1.B4"
 
         # current_search_engine_url を、save_settings() が呼び出される前にデフォルト値で初期化します。
         self.current_search_engine_url = "https://www.google.com/search?q=" 
