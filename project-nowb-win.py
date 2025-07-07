@@ -2749,11 +2749,11 @@ if __name__ == '__main__':
     app.processEvents() # スプラッシュスクリーンが確実に表示されるようにする
 
     # --- アプリケーションアイコンの設定 ---
-    app_icon = QIcon('browser_logo.png')
+    app_icon = QIcon('P-NOWB.ico')
     if not app_icon.isNull():
         app.setWindowIcon(app_icon)
     else:
-        print("警告: アプリケーションアイコン 'browser_logo.png' が見つかりませんでした。", file=sys.stderr)
+        print("警告: アプリケーションアイコン 'P-NOWB.ico' が見つかりませんでした。", file=sys.stderr)
 
     # --- テーマ設定 ---
     initial_theme = get_system_theme_mode()
