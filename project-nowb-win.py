@@ -321,6 +321,14 @@ class SettingsDialog(QDialog):
         self.restore_session_checkbox.setToolTip("このオプションを有効にすると、次回起動時に最後に開いていたタブが復元されます。")
         ui_layout.addWidget(self.restore_session_checkbox, 3, 0, 1, 3)
 
+        # UIリセットボタン
+        self.reset_ui_button = QPushButton("UIをデフォルトに戻す")
+        self.reset_ui_button.setToolTip("ランダムテーマなどで変更されたUIを、現在の設定に基づいた状態に戻します。")
+        # 親ウィジェット(FullFeaturedBrowser)にリセットメソッドがあれば接続する
+        if hasattr(self.parent(), 'reset_ui_to_defaults'):
+            self.reset_ui_button.clicked.connect(self.parent().reset_ui_to_defaults)
+        ui_layout.addWidget(self.reset_ui_button, 4, 0, 1, 3)
+
         ui_group.setLayout(ui_layout)
         main_layout.addWidget(ui_group, 2, 0, 1, 2)
 
@@ -1363,7 +1371,7 @@ class FullFeaturedBrowser(QMainWindow):
         """
         グローバルシグナルから受け取ったテーマモードに基づいてパレットを更新する。
         """
-        palette = QApplication.instance().palette()
+        palette = QPalette() # 新しいパレットを作成
         theme_qss = ""
         if theme_mode == "dark":
             palette.setColor(QPalette.ColorRole.Window, QColor(45, 45, 45))
@@ -1426,17 +1434,42 @@ class FullFeaturedBrowser(QMainWindow):
             """
 
         else: # "light"
-            # デフォルトのパレットに戻す
-            palette = QApplication.instance().style().standardPalette()
-            window_color = palette.color(QPalette.ColorRole.Window).name()
-            border_color = "#C4C4C3"
+            # ライトテーマの色を明示的に設定
+            palette.setColor(QPalette.ColorRole.Window, QColor(255, 255, 255))
+            palette.setColor(QPalette.ColorRole.WindowText, QColor(0, 0, 0))
+            palette.setColor(QPalette.ColorRole.Base, QColor(255, 255, 255))
+            palette.setColor(QPalette.ColorRole.AlternateBase, QColor(240, 240, 240))
+            palette.setColor(QPalette.ColorRole.Text, QColor(0, 0, 0))
+            palette.setColor(QPalette.ColorRole.Button, QColor(240, 240, 240))
+            palette.setColor(QPalette.ColorRole.ButtonText, QColor(0, 0, 0))
+            palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(255, 255, 220))
+            palette.setColor(QPalette.ColorRole.ToolTipText, QColor(0, 0, 0))
+            palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 0, 0))
+            palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 120, 215))
+            palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+            palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(128, 128, 128))
+
+            window_color = "#FFFFFF"
+            border_color = "#C0C0C0" # 少し暗めのボーダー
+            tab_bg_color = "#F0F0F0" # 非選択タブの背景
+            tab_hover_color = "#E0E0E0" # ホバー時の色
+
             theme_qss = f"""
+                QMenu {{
+                    background-color: #FFFFFF;
+                    color: #000000;
+                    border: 1px solid #C0C0C0;
+                }}
+                QMenu::item:selected {{
+                    background-color: #0078D7;
+                    color: #FFFFFF;
+                }}
                 QTabWidget::pane {{
                     border: 1px solid {border_color};
                     border-top: none;
                 }}
                 QTabBar::tab {{
-                    background-color: #E1E1E1;
+                    background-color: {tab_bg_color};
                     color: #000000;
                     border: 1px solid {border_color};
                     border-bottom: none;
@@ -1453,14 +1486,14 @@ class FullFeaturedBrowser(QMainWindow):
                     padding-bottom: 9px;
                 }}
                 QTabBar::tab:!selected:hover {{
-                    background-color: #F0F0F0;
+                    background-color: {tab_hover_color};
                 }}
             """
         
         self.qss_parts['theme'] = theme_qss
         self._apply_stylesheet()
-        QApplication.instance().setPalette(palette)
-        self.setPalette(palette)
+        self.setPalette(palette) # ウィンドウのパレットを設定
+        QApplication.instance().setPalette(palette) # アプリケーション全体のパレットを設定
     
     def update_background_image(self):
         """
@@ -1605,9 +1638,10 @@ class FullFeaturedBrowser(QMainWindow):
         page.fullScreenRequested.connect(lambda req, p=page: self.handle_fullscreen_request(req, p))
         # リンクホバー時にステータスバーを更新
         page.linkHovered.connect(self.handle_link_hovered)
-        # ウェブページのカスタムCSSを適用
-        page.runJavaScript(f"var style = document.createElement('style'); style.innerHTML = `{self.settings['custom_css']}`; document.head.appendChild(style);")
 
+        # ウェブページのカスタムCSSを適用（IDを付けて後から管理しやすくする）
+        js_code = f"var style = document.createElement('style'); style.id = 'project-nowb-custom-css'; style.innerHTML = `{self.settings.get('custom_css', '')}`; document.head.appendChild(style);"
+        page.runJavaScript(js_code)
         browser.urlChanged.connect(lambda q: self.update_url_bar(q, browser))
         browser.titleChanged.connect(lambda title, b=browser: self.update_tab_text(title, b))
         browser.loadProgress.connect(self.update_progress_bar)
@@ -2070,17 +2104,45 @@ class FullFeaturedBrowser(QMainWindow):
             self.update_bookmarks_menu()
             self.update_favorite_sites_toolbar()
             
-            # 背景画像を更新
-            self.update_background_image()
-            
             # 広告ブロッカーの設定を更新
             self.setup_adblocker()
             
-            # UIの更新をトリガー
-            self.update_palette(get_system_theme_mode())
+            # UIをリセットして、背景画像やカスタムCSSの変更を即時反映
+            self.reset_ui_to_defaults()
             
             self.save_settings() # 変更をファイルに保存
             self.statusBar().showMessage("設定が保存されました！", 3000)
+
+    def reset_ui_to_defaults(self):
+        """
+        UIの見た目を設定に基づいたデフォルト状態（システムテーマ、背景画像など）にリセットする。
+        """
+        # システムテーマに基づいてパレットとQSSを再適用
+        current_theme = get_system_theme_mode()
+        self.update_palette(current_theme)
+        
+        # 設定されている背景画像を再適用
+        self.update_background_image()
+        
+        # カスタムCSSを現在開いているすべてのタブに再適用
+        custom_css = self.settings.get('custom_css', '')
+        # 既存のカスタムスタイルを削除し、新しいものを挿入するJavaScript
+        js_code = f"""
+            var styleElement = document.getElementById('project-nowb-custom-css');
+            if (styleElement) {{
+                styleElement.remove();
+            }}
+            var style = document.createElement('style');
+            style.id = 'project-nowb-custom-css';
+            style.innerHTML = `{custom_css}`;
+            document.head.appendChild(style);
+        """
+        for i in range(self.tabs.count()):
+            widget = self.tabs.widget(i)
+            if isinstance(widget, QWebEngineView):
+                widget.page().runJavaScript(js_code)
+
+        self.statusBar().showMessage("UIをデフォルト設定にリセットしました。", 3000)
 
     def update_bookmarks_menu(self):
         self.bookmarks_menu.clear()
