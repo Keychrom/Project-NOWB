@@ -937,8 +937,8 @@ class FullFeaturedBrowser(QMainWindow):
         if self.is_private_window:
             self.history_menu.setEnabled(False)
             self.bookmarks_menu.setEnabled(False)
-        self.update_palette_from_system_theme()
         theme_signal.theme_changed.connect(self.update_palette)
+        self.update_palette(get_system_theme_mode()) # 起動時に現在のシステムテーマを適用
         self.update_background_image()
 
     def setup_adblocker(self):
@@ -2758,49 +2758,6 @@ if __name__ == '__main__':
         app.setWindowIcon(app_icon)
     else:
         print("警告: アプリケーションアイコン 'P-NOWB.ico' が見つかりませんでした。", file=sys.stderr)
-
-    # --- テーマ設定 ---
-    initial_theme = get_system_theme_mode()
-    if initial_theme == 'dark':
-        palette = QPalette()
-        palette.setColor(QPalette.ColorRole.Window, QColor(45, 45, 45))
-        palette.setColor(QPalette.ColorRole.WindowText, QColor(240, 240, 240))
-        palette.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
-        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(50, 50, 50))
-        palette.setColor(QPalette.ColorRole.Text, QColor(240, 240, 240))
-        palette.setColor(QPalette.ColorRole.Button, QColor(60, 60, 60))
-        palette.setColor(QPalette.ColorRole.ButtonText, QColor(240, 240, 240))
-        app.setPalette(palette)
-        app.setStyleSheet("""
-            QMenu {{ background-color: #282828; color: #F0F0F0; border: 1px solid #3A3A3A; }}
-            QMenu::item {{ padding: 5px 15px 5px 25px; }}
-            QMenu::item:selected {{ background-color: #0078D7; color: #FFFFFF; }}
-            QMenu::separator {{ height: 1px; background: #505050; margin: 5px 0px; }}
-            QTabWidget::pane {{
-                border: 1px solid #3A3A3A;
-                border-top: none;
-            }}
-            QTabBar::tab {{
-                background-color: #3C3C3C;
-                color: #F0F0F0;
-                border: 1px solid #3A3A3A;
-                border-bottom: none;
-                padding: 8px 16px;
-                margin-right: 1px;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-                width: 100px; /* タブの幅を固定 */
-                elide-mode: elide-right; /* はみ出したテキストを省略 */
-            }}
-            QTabBar::tab:selected {{
-                background-color: #2D2D2D;
-                margin-bottom: -1px;
-                padding-bottom: 9px;
-            }}
-            QTabBar::tab:!selected:hover {{
-                background-color: #4C4C4C;
-            }}
-        """)
 
     # --- メインウィンドウの作成と表示 ---
     window = FullFeaturedBrowser() # 時間のかかる初期化処理

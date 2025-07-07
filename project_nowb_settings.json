@@ -22,39 +22,23 @@
     "background_image": "",
     "custom_css": "",
     "window_size": [
-        1151,
-        591
+        1024,
+        768
     ],
     "window_pos": [
-        187,
-        105
+        241,
+        54
     ],
     "web_panel_url": "https://www.bing.com/chat",
-    "web_panel_visible": true,
+    "web_panel_visible": false,
     "splitter_sizes": [
-        1146,
+        1024,
         0
     ],
     "adblock_enabled": true,
     "restore_last_session": true,
     "last_session": [
-        "https://start.popmix-os.net/",
-        "https://www.bing.com/?scope=web&cc=JP",
-        "https://www.bing.com/search?q=ロバーツ監督本音「いなくなるのはホッとする」+天敵に3連敗も悲壮感なし&efirst=0&ecount=50&filters=tnTID%3A%22TOBP2_A62854C0A42FE8DDCA6A8EBBF6251DCA%22+tnVersion%3A%224e7a229a-3181-4e7b-b179-a0a2b58b433b%22+Segment%3A%22popularnow.carousel%22+tnCol%3A%221%22+tnOrder%3A%22a519bc07-f3f2-41ab-927f-d92314aa3243%22&form=HPNN01"
+        "https://start.popmix-os.net/"
     ],
-    "search_engine_url": "https://www.google.com/search?q=",
-    "theme": "dark",
-    "mouse_gestures_enabled": true,
-    "mouse_gesture_mappings": {
-        "D": "scroll_bottom",
-        "DL": "close_tab",
-        "DR": "new_tab",
-        "L": "back",
-        "LU": "prev_tab",
-        "R": "forward",
-        "RU": "next_tab",
-        "U": "scroll_top",
-        "UR": "reload"
-    },
-    "gesture_disabled_sites": []
+    "search_engine_url": "https://www.google.com/search?q="
 }
