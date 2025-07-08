@@ -27,7 +27,7 @@
     ],
     "window_pos": [
         92,
-        62
+        31
     ],
     "web_panel_url": "https://www.bing.com/chat",
     "web_panel_visible": false,
@@ -40,5 +40,7 @@
     "last_session": [
         "https://start.popmix-os.net/"
     ],
-    "search_engine_url": "https://www.google.com/search?q="
+    "search_engine_url": "https://www.google.com/search?q=",
+    "sleep_mode_enabled": true,
+    "sleep_mode_interval": 600000
 }

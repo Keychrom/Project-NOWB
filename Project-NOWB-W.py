@@ -11,7 +11,7 @@ from PyQt6.QtCore import QUrl, QFileInfo, Qt, QTimer, QSize, pyqtSignal, QObject
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QToolBar, QLineEdit,
                              QTabWidget, QProgressBar, QMenu, QFileDialog, QInputDialog,
                              QComboBox, QMessageBox, QSlider, QLabel, QWidget,
-                             QCheckBox, QSplitter, QDialog, QGridLayout, QListWidget,
+                             QCheckBox, QSplitter, QDialog, QGridLayout, QListWidget, QSpinBox,
                              QPushButton, QVBoxLayout, QHBoxLayout, QGroupBox,
                              QListWidgetItem, QPlainTextEdit, QStyle, QSplashScreen)
 from PyQt6.QtGui import QAction, QKeySequence, QColor, QPalette, QImage, QPainter, QPixmap, QIcon, QBrush
@@ -321,13 +321,33 @@ class SettingsDialog(QDialog):
         self.restore_session_checkbox.setToolTip("このオプションを有効にすると、次回起動時に最後に開いていたタブが復元されます。")
         ui_layout.addWidget(self.restore_session_checkbox, 3, 0, 1, 3)
 
+        # 自動スリープモード設定
+        sleep_group_layout = QHBoxLayout()
+        self.sleep_mode_checkbox = QCheckBox("自動スリープモードを有効にする")
+        self.sleep_mode_checkbox.setChecked(self.settings_data.get('sleep_mode_enabled', True))
+        self.sleep_mode_checkbox.setToolTip("このオプションを有効にすると、指定した時間操作がない場合にタブがスリープ状態になります。")
+
+        self.sleep_time_spinbox = QSpinBox()
+        self.sleep_time_spinbox.setRange(1, 120) # 1分から120分
+        current_interval_min = self.settings_data.get('sleep_mode_interval', 300000) // 60000
+        self.sleep_time_spinbox.setValue(current_interval_min)
+        self.sleep_time_spinbox.setToolTip("無操作状態がこの時間続くとスリープします。")
+
+        sleep_group_layout.addWidget(self.sleep_mode_checkbox)
+        sleep_group_layout.addWidget(self.sleep_time_spinbox)
+        sleep_group_layout.addWidget(QLabel("分間無操作でスリープ"))
+        sleep_group_layout.addStretch(1)
+        self.sleep_time_spinbox.setEnabled(self.sleep_mode_checkbox.isChecked())
+        self.sleep_mode_checkbox.toggled.connect(self.sleep_time_spinbox.setEnabled)
+        ui_layout.addLayout(sleep_group_layout, 4, 0, 1, 3)
+
         # UIリセットボタン
         self.reset_ui_button = QPushButton("UIをデフォルトに戻す")
         self.reset_ui_button.setToolTip("ランダムテーマなどで変更されたUIを、現在の設定に基づいた状態に戻します。")
         # 親ウィジェット(FullFeaturedBrowser)にリセットメソッドがあれば接続する
         if hasattr(self.parent(), 'reset_ui_to_defaults'):
             self.reset_ui_button.clicked.connect(self.parent().reset_ui_to_defaults)
-        ui_layout.addWidget(self.reset_ui_button, 4, 0, 1, 3)
+        ui_layout.addWidget(self.reset_ui_button, 5, 0, 1, 3)
 
         ui_group.setLayout(ui_layout)
         main_layout.addWidget(ui_group, 2, 0, 1, 2)
@@ -438,6 +458,8 @@ class SettingsDialog(QDialog):
             'custom_css': self.custom_css_input.toPlainText(),
             'restore_last_session': self.restore_session_checkbox.isChecked(),
             'adblock_enabled': self.adblock_checkbox.isChecked(),
+            'sleep_mode_enabled': self.sleep_mode_checkbox.isChecked(),
+            'sleep_mode_interval': self.sleep_time_spinbox.value() * 60000, # 分をミリ秒に変換
         }
 
 class DownloadItemWidget(QWidget):
@@ -757,11 +779,12 @@ class FullFeaturedBrowser(QMainWindow):
         self.blocked_timer = QTimer()
         self.blocked_timer.setSingleShot(True)
         self.blocked_timer.timeout.connect(self.unblock_sites)
-        
+
         self.sleep_timer = QTimer()
-        self.sleep_timer.setInterval(300000) # 5分
+        self.sleep_timer.setInterval(self.settings.get('sleep_mode_interval', 300000)) # デフォルト5分
         self.sleep_timer.timeout.connect(self.activate_sleep_mode)
-        self.sleep_timer.start()
+        if not self.is_private_window and self.settings.get('sleep_mode_enabled', True):
+            self.sleep_timer.start()
 
         self.tab_groups = {}
         self.tab_group_counter = 0
@@ -1739,7 +1762,11 @@ class FullFeaturedBrowser(QMainWindow):
 
         self.tabs.removeTab(index)
         self.update_tab_groups_menu()
-    def reset_sleep_timer(self): self.sleep_timer.start()
+    def reset_sleep_timer(self):
+        """ユーザー操作があった場合にスリープタイマーをリセットする。"""
+        # 設定で有効になっている場合のみタイマーを開始/リセットする
+        if not self.is_private_window and self.settings.get('sleep_mode_enabled', True):
+            self.sleep_timer.start()
 
     def handle_link_hovered(self, url):
         """リンクにホバーした際にステータスバーにURLを表示する。"""
@@ -2081,6 +2108,21 @@ class FullFeaturedBrowser(QMainWindow):
         layout.addLayout(button_layout); ok_button.clicked.connect(notes_dialog.accept); cancel_button.clicked.connect(notes_dialog.reject)
         if notes_dialog.exec(): self.notes[current_tab_index] = text_edit.toPlainText(); self.statusBar().showMessage("メモを保存しました。", 2000)
 
+    def update_sleep_timer_status(self):
+        """設定に基づいてスリープタイマーを開始または停止する。"""
+        if self.is_private_window:
+            return
+
+        # タイマーの間隔も設定から更新
+        self.sleep_timer.setInterval(self.settings.get('sleep_mode_interval', 300000))
+
+        if self.settings.get('sleep_mode_enabled', True):
+            if not self.sleep_timer.isActive():
+                self.sleep_timer.start()
+                self.statusBar().showMessage("自動スリープモードが有効になりました。", 2000)
+        elif self.sleep_timer.isActive():
+            self.sleep_timer.stop()
+            self.statusBar().showMessage("自動スリープモードが無効になりました。", 2000)
     def show_settings_dialog(self):
         """設定ダイアログを開き、設定を更新する。"""
         # 現在の設定とバージョン情報を渡す
@@ -2106,6 +2148,9 @@ class FullFeaturedBrowser(QMainWindow):
             
             # 広告ブロッカーの設定を更新
             self.setup_adblocker()
+
+            # スリープタイマーの状態を更新
+            self.update_sleep_timer_status()
             
             # UIをリセットして、背景画像やカスタムCSSの変更を即時反映
             self.reset_ui_to_defaults()
@@ -2718,7 +2763,9 @@ def handle_first_run():
         'splitter_sizes': [800, 250],
         'adblock_enabled': True,
         'restore_last_session': True,
-        'last_session': []
+        'last_session': [],
+        'sleep_mode_enabled': True,
+        'sleep_mode_interval': 300000, # 5分 (ミリ秒)
     }
 
     initial_dialog_settings = {
