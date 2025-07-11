@@ -749,7 +749,7 @@ class FullFeaturedBrowser(QMainWindow):
         # Download Managerは必要になった時に初期化する（起動時間短縮のため）
         self.download_manager = None
         # ここにバージョン情報を定義
-        self.browser_version = "V1.0.0-Alpha2.0"
+        self.browser_version = "V1.0.0-Beta1-Build-5"
 
         # current_search_engine_url を、save_settings() が呼び出される前にデフォルト値で初期化します。
         self.current_search_engine_url = "https://www.google.com/search?q=" 
@@ -1445,6 +1445,7 @@ class FullFeaturedBrowser(QMainWindow):
                     border-top-right-radius: 8px;
                     width: 160px; /* タブの幅を固定 */
                     elide-mode: elide-right; /* はみ出したテキストを省略 */
+                    text-align: left; /* テキストを左寄せ */
                 }
                 QTabBar::tab:selected {
                     background-color: #2D2D2D; /* ウィンドウ背景と同じ色 */
@@ -1502,6 +1503,7 @@ class FullFeaturedBrowser(QMainWindow):
                     border-top-right-radius: 8px;
                     width: 160px; /* タブの幅を固定 */
                     elide-mode: elide-right; /* はみ出したテキストを省略 */
+                    text-align: left; /* テキストを左寄せ */
                 }}
                 QTabBar::tab:selected {{
                     background-color: {window_color};
@@ -2900,6 +2902,7 @@ if __name__ == '__main__':
                 border-top-right-radius: 8px;
                 width: 160px; /* タブの幅を固定 */
                 elide-mode: elide-right; /* はみ出したテキストを省略 */
+                text-align: left; /* テキストを左寄せ */
             }}
             QTabBar::tab:selected {{
                 background-color: #2D2D2D;
