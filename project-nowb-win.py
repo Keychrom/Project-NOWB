@@ -36,6 +36,10 @@ except AttributeError:
     # The integer value is 7.
     FULLSCREEN_FEATURE = 7
 
+# --- バージョン定数 ---
+APP_VERSION = "V1.0.0-Beta1-Build-7" # アプリケーションのバージョン
+SETTINGS_VERSION = "1.1" # 設定ファイルのバージョン
+
 # --- 定数定義 ---
 ADBLOCK_RULES_FILE = "adblock_list.txt"
 DEFAULT_ADBLOCK_RULES = [
@@ -300,26 +304,18 @@ class SettingsDialog(QDialog):
         # --- UI/カスタマイズ設定グループ ---
         ui_group = QGroupBox("UI/カスタマイズ設定")
         ui_layout = QGridLayout()
-        
-        # 背景画像設定
-        self.bg_image_path_input = QLineEdit(self.settings_data.get('background_image', ''))
-        self.bg_image_button = QPushButton("参照...")
-        self.bg_image_button.clicked.connect(self.select_background_image)
-        ui_layout.addWidget(QLabel("背景画像:"), 0, 0)
-        ui_layout.addWidget(self.bg_image_path_input, 0, 1)
-        ui_layout.addWidget(self.bg_image_button, 0, 2)
 
         # カスタムCSS設定
         self.custom_css_input = QPlainTextEdit(self.settings_data.get('custom_css', ''))
         self.custom_css_input.setPlaceholderText("ここにカスタムCSSを入力してください。例: body { background-color: #f0f0f0; }")
-        ui_layout.addWidget(QLabel("カスタムCSS:"), 1, 0, 1, 3)
-        ui_layout.addWidget(self.custom_css_input, 2, 0, 1, 3)
+        ui_layout.addWidget(QLabel("カスタムCSS:"), 0, 0, 1, 3)
+        ui_layout.addWidget(self.custom_css_input, 1, 0, 1, 3)
         
         # セッション復元設定
         self.restore_session_checkbox = QCheckBox("起動時に前回のセッションを復元する")
         self.restore_session_checkbox.setChecked(self.settings_data.get('restore_last_session', True))
         self.restore_session_checkbox.setToolTip("このオプションを有効にすると、次回起動時に最後に開いていたタブが復元されます。")
-        ui_layout.addWidget(self.restore_session_checkbox, 3, 0, 1, 3)
+        ui_layout.addWidget(self.restore_session_checkbox, 2, 0, 1, 3)
 
         # 自動スリープモード設定
         sleep_group_layout = QHBoxLayout()
@@ -339,15 +335,15 @@ class SettingsDialog(QDialog):
         sleep_group_layout.addStretch(1)
         self.sleep_time_spinbox.setEnabled(self.sleep_mode_checkbox.isChecked())
         self.sleep_mode_checkbox.toggled.connect(self.sleep_time_spinbox.setEnabled)
-        ui_layout.addLayout(sleep_group_layout, 4, 0, 1, 3)
+        ui_layout.addLayout(sleep_group_layout, 3, 0, 1, 3)
 
         # UIリセットボタン
         self.reset_ui_button = QPushButton("UIをデフォルトに戻す")
         self.reset_ui_button.setToolTip("ランダムテーマなどで変更されたUIを、現在の設定に基づいた状態に戻します。")
         # 親ウィジェット(FullFeaturedBrowser)にリセットメソッドがあれば接続する
         if hasattr(self.parent(), 'reset_ui_to_defaults'):
-            self.reset_ui_button.clicked.connect(self.parent().reset_ui_to_defaults)
-        ui_layout.addWidget(self.reset_ui_button, 5, 0, 1, 3)
+            self.reset_ui_button.clicked.connect(lambda: self.parent().reset_ui_to_defaults(silent=False))
+        ui_layout.addWidget(self.reset_ui_button, 4, 0, 1, 3)
 
         ui_group.setLayout(ui_layout)
         main_layout.addWidget(ui_group, 2, 0, 1, 2)
@@ -422,11 +418,6 @@ class SettingsDialog(QDialog):
         for item in selected_items:
             self.favorites_list.takeItem(self.favorites_list.row(item))
 
-    def select_background_image(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "背景画像の選択", "", "Image Files (*.png *.jpg *.jpeg *.gif)")
-        if file_path:
-            self.bg_image_path_input.setText(file_path)
-
     def get_settings(self):
         """ダイアログから設定を取得して返す"""
         new_blocked_sites = [self.blocked_list.item(i).text() for i in range(self.blocked_list.count())]
@@ -454,7 +445,6 @@ class SettingsDialog(QDialog):
             'search_engine_name': selected_engine_name, # 新しく選択された検索エンジンの名前
             'current_search_engine_url': selected_engine_url, # 新しく選択された検索エンジンのURL
             'favorite_sites': new_favorites,
-            'background_image': self.bg_image_path_input.text(),
             'custom_css': self.custom_css_input.toPlainText(),
             'restore_last_session': self.restore_session_checkbox.isChecked(),
             'adblock_enabled': self.adblock_checkbox.isChecked(),
@@ -749,7 +739,8 @@ class FullFeaturedBrowser(QMainWindow):
         # Download Managerは必要になった時に初期化する（起動時間短縮のため）
         self.download_manager = None
         # ここにバージョン情報を定義
-        self.browser_version = "V1.0.0-Beta1-Build-5"
+        self.browser_version = APP_VERSION
+        self.settings_version = SETTINGS_VERSION
 
         # current_search_engine_url を、save_settings() が呼び出される前にデフォルト値で初期化します。
         self.current_search_engine_url = "https://www.google.com/search?q=" 
@@ -771,6 +762,10 @@ class FullFeaturedBrowser(QMainWindow):
             if not self.settings_data:
                 QMessageBox.critical(None, "致命的なエラー", f"設定ファイル '{self.settings_file}' が見つからないか、破損しています。")
                 sys.exit(1)
+
+            # --- 設定ファイルのマイグレーション ---
+            self.settings_data = self.migrate_settings(self.settings_data)
+            # --- ここまで ---
 
             self.settings = self.settings_data.copy()
             self.current_search_engine_url = self.settings_data.get('current_search_engine_url', self.settings.get('search_engines', {}).get("Google", "https://www.google.com/search?q="))
@@ -968,9 +963,8 @@ class FullFeaturedBrowser(QMainWindow):
         if self.is_private_window:
             self.history_menu.setEnabled(False)
             self.bookmarks_menu.setEnabled(False)
-        self.update_palette_from_system_theme()
         theme_signal.theme_changed.connect(self.update_palette)
-        self.update_background_image()
+        self.reset_ui_to_defaults(silent=True) # 起動時にUIをデフォルト状態にリセット
 
     def setup_adblocker(self):
         """設定に基づいて広告ブロッカーをセットアップする。"""
@@ -1235,6 +1229,64 @@ class FullFeaturedBrowser(QMainWindow):
         # createWindowを呼び出した側で後からURLが設定されるため、「読み込み中...」というラベルでタブを作成する。
         self.add_new_tab(page_to_set=page, label="読み込み中...")
 
+    def migrate_settings(self, settings_data):
+        """古い設定ファイルを新しいバージョンに変換する。"""
+        file_version = settings_data.get('settings_version')
+
+        if file_version == self.settings_version:
+            return settings_data # 最新バージョンなので何もしない
+
+        # マイグレーションが必要な場合のみバックアップと通知を行う
+        print(f"古い設定ファイル（バージョン: {file_version}）を検出しました。バージョン {self.settings_version} に更新します。")
+        
+        backup_file = f"{self.settings_file}.bak_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+        try:
+            import shutil
+            shutil.copy2(self.settings_file, backup_file)
+            QMessageBox.information(self, "設定ファイルの更新",
+                                    f"設定ファイルが新しいバージョンに更新されました。\n"
+                                    f"元の設定は '{backup_file}' としてバックアップされています。")
+        except FileNotFoundError:
+            # これは初回起動フローから来た場合など、ファイルがまだないケース。問題ない。
+            pass
+        except Exception as e:
+            print(f"設定ファイルのバックアップ作成に失敗しました: {e}", file=sys.stderr)
+            QMessageBox.warning(self, "バックアップ失敗", "設定ファイルのバックアップ作成に失敗しました。")
+
+        updated_settings = settings_data.copy()
+
+        # --- バージョンごとのマイグレーション処理 ---
+        
+        # バージョン情報がない、または "1.1" より古い場合
+        if file_version is None or file_version < "1.1":
+            print("Migrating settings to version 1.1...")
+            
+            # 'search_engine_url' が存在し、'current_search_engine_url' がない場合、キー名を変更
+            if 'search_engine_url' in updated_settings and 'current_search_engine_url' not in updated_settings:
+                updated_settings['current_search_engine_url'] = updated_settings.pop('search_engine_url')
+            
+            # 新しく追加された可能性のある設定項目にデフォルト値を追加
+            # setdefault を使うことで、既存のユーザー設定を上書きしない
+            defaults = {
+                'sleep_mode_enabled': True,
+                'sleep_mode_interval': 300000,
+                'restore_last_session': True,
+                'adblock_enabled': True,
+                'last_session': [],
+                'web_panel_visible': False,
+                'splitter_sizes': [800, 250],
+            }
+            for key, value in defaults.items():
+                updated_settings.setdefault(key, value)
+        
+        # --- 将来のマイグレーションはここに追加 ---
+        # if file_version < "1.2":
+        #     ...
+
+        # 最後にバージョン情報を更新し、更新後の設定を返す
+        updated_settings['settings_version'] = self.settings_version
+        return updated_settings
+
     def load_settings(self):
         """設定をファイルから読み込む。"""
         if self.is_private_window:
@@ -1257,6 +1309,10 @@ class FullFeaturedBrowser(QMainWindow):
             self.settings['window_size'] = [self.size().width(), self.size().height()]
             self.settings['window_pos'] = [self.pos().x(), self.pos().y()]
         
+        # バージョン情報を保存
+        self.settings['settings_version'] = self.settings_version
+        self.settings['app_version'] = self.browser_version
+
         # current_search_engine_url も保存する
         self.settings['current_search_engine_url'] = self.current_search_engine_url
         
@@ -1520,27 +1576,6 @@ class FullFeaturedBrowser(QMainWindow):
         self.setPalette(palette) # ウィンドウのパレットを設定
         QApplication.instance().setPalette(palette) # アプリケーション全体のパレットを設定
     
-    def update_background_image(self):
-        """
-        設定された背景画像をブラウザの背景に設定する。
-        """
-        image_path = self.settings.get('background_image', '')
-        style = ""
-        if image_path and os.path.exists(image_path):
-            # QSSではパスの区切り文字にバックスラッシュではなくスラッシュを使用する
-            safe_image_path = image_path.replace('\\', '/')
-            style = f"""
-                QMainWindow {{
-                    background-image: url({safe_image_path});
-                    background-repeat: no-repeat;
-                    background-position: center;
-                    background-attachment: fixed;
-                    background-size: cover;
-                }}
-            """
-        self.qss_parts['background'] = style
-        self._apply_stylesheet()
-
     def toggle_web_panel(self, visible):
         """ウェブパネルの表示/非表示を切り替える。"""
         if self.is_private_window:
@@ -2160,16 +2195,13 @@ class FullFeaturedBrowser(QMainWindow):
             self.save_settings() # 変更をファイルに保存
             self.statusBar().showMessage("設定が保存されました！", 3000)
 
-    def reset_ui_to_defaults(self):
+    def reset_ui_to_defaults(self, silent=False):
         """
         UIの見た目を設定に基づいたデフォルト状態（システムテーマ、背景画像など）にリセットする。
         """
         # システムテーマに基づいてパレットとQSSを再適用
         current_theme = get_system_theme_mode()
         self.update_palette(current_theme)
-        
-        # 設定されている背景画像を再適用
-        self.update_background_image()
         
         # カスタムCSSを現在開いているすべてのタブに再適用
         custom_css = self.settings.get('custom_css', '')
@@ -2189,7 +2221,8 @@ class FullFeaturedBrowser(QMainWindow):
             if isinstance(widget, QWebEngineView):
                 widget.page().runJavaScript(js_code)
 
-        self.statusBar().showMessage("UIをデフォルト設定にリセットしました。", 3000)
+        if not silent:
+            self.statusBar().showMessage("UIをデフォルト設定にリセットしました。", 3000)
 
     def update_bookmarks_menu(self):
         self.bookmarks_menu.clear()
@@ -2740,6 +2773,8 @@ def handle_first_run():
     
     # デフォルト設定
     settings_data = {
+        'settings_version': SETTINGS_VERSION,
+        'app_version': APP_VERSION,
         'first_run_completed': False,
         'home_url': 'https://start.popmix-os.net',
         'search_engines': {
@@ -2756,7 +2791,6 @@ def handle_first_run():
             "YouTube": "http://youtube.com",
             "Wikipedia": "https://www.wikipedia.org"
         },
-        'background_image': '',
         'custom_css': '',
         'window_size': [1024, 768],
         'window_pos': [100, 100],
